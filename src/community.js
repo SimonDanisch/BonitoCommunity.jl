@@ -362,6 +362,19 @@ const SECRET_HINT = {
     mastodon: 'Mastodon: Preferences → Development → New application, scopes read and write; paste its access token.',
 };
 
+// Kept deliberately brief: this is the checklist someone needs while setting a
+// platform up, not a second copy of each platform's developer documentation.
+function setupGuide() {
+    const step = (name, text) => div('cm-setup-step', el('strong', '', {}, name), el('span', '', {}, text));
+    return div('cm-setup',
+        el('div', 'cm-h2', {}, 'Set up an account'),
+        step('Bluesky', 'Create an app password in Settings → Privacy and security; add your handle and that password below.'),
+        step('Mastodon', 'Create an app in Preferences → Development with read + write scopes; add its access token below.'),
+        step('YouTube', 'Create a Google Cloud Desktop OAuth client with YouTube Data API v3, save it below, then connect the channel.'),
+        step('Facebook + Instagram', 'Create a long-lived Facebook Page token with the listed permissions; the linked Instagram account is found automatically.'),
+        step('TikTok + LinkedIn', 'No credentials needed: copy an approved draft, post it there, then paste its published link back here.'));
+}
+
 function accounts(d) {
     const box = el('div', 'cm-card cm-panel', {'data-box': 'accounts'});
     const list = el('div', 'cm-accounts');
@@ -390,7 +403,7 @@ function accounts(d) {
         field('Handle', el('input', 'cm-input', {name: 'handle', type: 'text', placeholder: 'makie.org · makie@fosstodon.org', autocomplete: 'off'})),
         field('Server', server),
         field('App password / token', el('input', 'cm-input', {name: 'secret', type: 'password', autocomplete: 'new-password'})));
-    box.append(el('div', 'cm-h2', {}, 'Accounts'), list, el('div', 'cm-h2', {}, 'Add a Bluesky or Mastodon account'), form, hint,
+    box.append(el('div', 'cm-h2', {}, 'Accounts'), list, setupGuide(), el('div', 'cm-h2', {}, 'Add a Bluesky or Mastodon account'), form, hint,
         div('cm-row', btn('Check and add', 'bt-btn-primary', 'add-account'), btn('Close', 'bt-btn-ghost', 'toggle-accounts')),
         el('div', 'cm-hint', {}, 'Each brand has one posting account per platform; every other account on that platform reposts what it publishes.'),
         youtubeAccounts(d, select, field), metaAccounts(d, select, field));

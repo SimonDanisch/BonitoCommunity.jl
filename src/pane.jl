@@ -446,4 +446,9 @@ const CommunityStyles = Styles(
     CSS(".cm-account-handle", "font-weight" => "500", "flex" => "1 1 auto", "min-width" => "0", "overflow" => "hidden",
         "text-overflow" => "ellipsis"),
     CSS(".cm-hint", "font-size" => "12px", "color" => "var(--bt-text-muted)", "line-height" => "1.45"),
+    CSS(".cm-setup", "display" => "grid", "grid-template-columns" => "repeat(auto-fit, minmax(210px, 1fr))", "gap" => "8px",
+        "padding" => "12px", "border-radius" => "10px", "background" => "var(--bt-bg)", "border" => "1px solid var(--bt-border)"),
+    CSS(".cm-setup .cm-h2", "grid-column" => "1 / -1", "margin-bottom" => "2px"),
+    CSS(".cm-setup-step", "display" => "grid", "gap" => "2px", "font-size" => "12px", "line-height" => "1.4"),
+    CSS(".cm-setup-step span", "color" => "var(--bt-text-muted)"),
 )
