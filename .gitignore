@@ -1,0 +1,7 @@
+# project material (videos, renders): large, not code
+/projects/
+# state of the local dev server
+/.devserver/
+Manifest.toml
+# screenshots of the browser walkthrough (e2e/flow.jl)
+/e2e/shots/

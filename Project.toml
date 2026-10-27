@@ -1,0 +1,24 @@
+name = "CommunityManager"
+uuid = "07b306de-97e7-4ef3-9dbf-263bf4d1eccb"
+version = "0.1.0"
+authors = ["Simon Danisch <sdanisch@gmail.com>"]
+
+[deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+Bonito = "824d6782-a2ef-11e9-3a09-e5662e0c26f8"
+BonitoAgents = "f4e5b6c7-8901-4a2b-9c3d-4e5f6a7b8c9d"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
+
+[sources]
+Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
+BonitoAgents = {path = "../AgentsDev/dev/BonitoAgents/BonitoAgents"}
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
