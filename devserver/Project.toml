@@ -4,10 +4,10 @@
 Bonito = "824d6782-a2ef-11e9-3a09-e5662e0c26f8"
 BonitoAgents = "f4e5b6c7-8901-4a2b-9c3d-4e5f6a7b8c9d"
 BonitoWorker = "98909ed9-6989-4829-81af-73688ee23085"
-CommunityManager = "07b306de-97e7-4ef3-9dbf-263bf4d1eccb"
+BonitoCommunity = "4c5af91b-b856-41fb-93f5-384ee8ea9157"
 
 [sources]
 Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
 BonitoAgents = {path = "../../AgentsDev/dev/BonitoAgents/BonitoAgents"}
 BonitoWorker = {path = "../../AgentsDev/dev/BonitoAgents/BonitoWorker"}
-CommunityManager = {path = ".."}
+BonitoCommunity = {path = ".."}

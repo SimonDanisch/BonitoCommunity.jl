@@ -6,7 +6,7 @@ Bonito = "824d6782-a2ef-11e9-3a09-e5662e0c26f8"
 BonitoAgents = "f4e5b6c7-8901-4a2b-9c3d-4e5f6a7b8c9d"
 BonitoMCP = "4a1c91af-1c90-46a4-8594-a3846516869d"
 BonitoWorker = "98909ed9-6989-4829-81af-73688ee23085"
-CommunityManager = "07b306de-97e7-4ef3-9dbf-263bf4d1eccb"
+BonitoCommunity = "4c5af91b-b856-41fb-93f5-384ee8ea9157"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 ElectronCall = "8ddd578f-0c94-4c64-8c65-f083f291b266"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
@@ -21,6 +21,6 @@ Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.
 BonitoAgents = {path = "../../AgentsDev/dev/BonitoAgents/BonitoAgents"}
 BonitoMCP = {path = "../../AgentsDev/dev/BonitoAgents/BonitoMCP"}
 BonitoWorker = {path = "../../AgentsDev/dev/BonitoAgents/BonitoWorker"}
-CommunityManager = {path = ".."}
+BonitoCommunity = {path = ".."}
 ElectronCall = {url = "https://github.com/IanButterworth/ElectronCall.jl.git", rev = "sd/testsuite"}
 MockACP = {path = "../../AgentsDev/dev/BonitoAgents/BonitoAgents/test/MockACP"}

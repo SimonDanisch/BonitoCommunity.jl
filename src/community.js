@@ -1,4 +1,4 @@
-// The Community app's dashboard (CommunityManager.jl `Dashboard`). The server
+// The Community app's dashboard (BonitoCommunity.jl `Dashboard`). The server
 // sends what to show as data (`data`, mode "overview" or "project") and gets the
 // user's actions back on one channel (`act`, as [action, id, value]);
 // `feedback` carries what couldn't be done. This module owns the DOM between.

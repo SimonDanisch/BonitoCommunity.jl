@@ -1,5 +1,5 @@
 """
-    CommunityManager
+    BonitoCommunity
 
 A BonitoAgents app for the community work around Makie, Bonito and
 Makie4Science. One project per video or other material (a folder under
@@ -10,9 +10,12 @@ then collects the replies and their answers.
 
 Run it next to the built-in apps:
 
-    BonitoAgents.serve(; apps = (BonitoAgents.BUILTIN_APPS..., CommunityApp))
+    Pkg.add("BonitoCommunity")
+
+The ordinary BonitoAgents server discovers this package when it is installed as
+a direct dependency and its Project.toml has `[bonitoagents] plugin = true`.
 """
-module CommunityManager
+module BonitoCommunity
 
 import BonitoAgents
 using BonitoAgents: AgentApp, AppContext, AppTool, Param, ToolScope, AppChat, AppKeyedChats, AppCall, AppError,
@@ -25,6 +28,10 @@ using Base64: base64encode
 import HTTP, JSON, SHA, Sockets
 
 export CommunityApp
+
+function __init__()
+    BonitoAgents.register_app!(CommunityApp)
+end
 
 include("model.jl")
 include("platforms.jl")
@@ -40,4 +47,4 @@ include("inbox.jl")
 include("tools.jl")
 include("pane.jl")
 
-end # module CommunityManager
+end # module BonitoCommunity

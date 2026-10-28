@@ -4,9 +4,9 @@
 # Mastodon methods are replaced by ones that record what they were asked.
 using Test, Dates
 import HTTP, JSON
-using BonitoAgents, CommunityManager
+using BonitoAgents, BonitoCommunity
 const BT = BonitoAgents
-const CM = CommunityManager
+const CM = BonitoCommunity
 
 # What the stubbed Mastodon was asked to do, and the replies it hands out.
 const NET = (posted = Any[], reposted = Any[], answered = Any[], replies = Any[], mentions = Any[])
@@ -51,7 +51,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
              a isa Union{CM.Project,CM.Draft,CM.Post,CM.Reply,CM.InboxItem,CM.Account} ?
                  all(f -> same(getfield(a, f), getfield(b, f)), fieldnames(typeof(a))) : a == b
 
-@testset "CommunityManager" begin
+@testset "BonitoCommunity" begin
     server, app, projects = test_server()
     app.poller === nothing || close(app.poller)   # the test drives the checks itself
 
@@ -168,7 +168,8 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         CM.publish_in_background!(app, 2)
         @test_throws BT.AppError CM.publish_in_background!(app, 2)         # claimed: no second post
         for _ in 1:100
-            CM.find_draft(app, 2).status == "published" && break
+            d = CM.find_draft(app, 2)
+            d.status == "published" && length(d.posts) == 3 && break
             sleep(0.05)
         end
         d2 = CM.find_draft(app, 2)

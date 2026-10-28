@@ -1,5 +1,5 @@
-name = "CommunityManager"
-uuid = "07b306de-97e7-4ef3-9dbf-263bf4d1eccb"
+name = "BonitoCommunity"
+uuid = "4c5af91b-b856-41fb-93f5-384ee8ea9157"
 version = "0.1.0"
 authors = ["Simon Danisch <sdanisch@gmail.com>"]
 
@@ -22,3 +22,6 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
+
+[bonitoagents]
+plugin = true

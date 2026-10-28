@@ -1,4 +1,4 @@
-# CommunityManager
+# BonitoCommunity
 
 A BonitoAgents app for the community work around Makie, Bonito and Makie4Science.
 
@@ -41,8 +41,18 @@ forums and repositories, YouTube privacy) are in `settings.json` next to it.
 
     julia --project=devserver devserver/run.jl     # dev server on http://127.0.0.1:8139
 
-BonitoAgents comes from `../AgentsDev/dev/BonitoAgents` (branch `sd/community-app`,
-which adds keyed app chats, `AppKeyedChats`, `chat_key` and `chat_file_url`).
+## Install as a server plugin
+
+Install BonitoCommunity into the same Julia environment from which the normal
+BonitoAgents server runs:
+
+    cd /path/to/BonitoAgents.jl
+    julia --project=. -e 'using Pkg; Pkg.add("BonitoCommunity")'
+
+Then run `BonitoAgents/assets/install_server.sh` normally. BonitoAgents loads
+direct packages that explicitly opt in with `[bonitoagents] plugin = true`; this
+package registers the Community app when it loads. No server launcher, systemd
+unit or local edit to BonitoAgents is needed.
 
 - Unit tests (network stubbed or faked locally): `julia --project -e 'using Pkg; Pkg.test()'`
 - Browser walkthrough with a scripted agent, screenshots in `e2e/shots/`:

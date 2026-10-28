@@ -7,9 +7,9 @@
 # overview's agent starts the project chat (`cm_start_project_chat`), whose
 # agent writes the drafts (`project_draft`) and submits them, all through the
 # real MCP. Then the project's pane is reviewed, a draft approved, one sent back.
-using BonitoAgents, CommunityManager, Dates, Test
+using BonitoAgents, BonitoCommunity, Dates, Test
 const BT = BonitoAgents
-const CM = CommunityManager
+const CM = BonitoCommunity
 include(joinpath(pkgdir(BonitoAgents), "test", "testkit", "TestKit.jl"))
 const TK = TestKit
 

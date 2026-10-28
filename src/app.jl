@@ -1,13 +1,15 @@
 # The app: its settings, its state and every change to it.
 
-# Projects live next to the code by default: CommunityManager/projects/<project>.
+# Projects belong to the app's persistent state, never to the package source
+# tree. A package installed by Pkg lives in a shared, often read-only depot.
 # The server reads them directly, so for now the server and the worker the
 # project chats run on are the same machine.
-const DEFAULT_PROJECTS_DIR = joinpath(dirname(@__DIR__), "projects")
+default_projects_dir(ctx::AppContext) = joinpath(ctx.dir, "projects")
+default_settings(ctx::AppContext) = Settings(default_projects_dir(ctx), DEFAULT_BRANDS, DEFAULT_WATCHES, "private")
 
 "settings.json: written with the defaults on first start, edited by hand. Fields added later get their default."
 JSON.@defaults struct Settings
-    projects_dir::String = DEFAULT_PROJECTS_DIR
+    projects_dir::String = ""
     brands::Vector{Brand} = DEFAULT_BRANDS
     watches::Vector{Watch} = DEFAULT_WATCHES
     # What YouTube uploads start as. An API project Google hasn't audited can only upload private videos.
@@ -37,7 +39,7 @@ function CommunityApp(ctx::AppContext; poll::Bool = true)
     settings_file = joinpath(ctx.dir, "settings.json")
     settings = load_json_tolerant(settings_file, "community settings.json", Settings)
     if settings === nothing
-        settings = Settings()
+        settings = default_settings(ctx)
         atomic_write_json(settings_file, settings)
     end
     file = joinpath(ctx.dir, "community.json")

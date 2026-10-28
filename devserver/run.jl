@@ -4,8 +4,7 @@
 #
 # Its state (chats, the app's community.json and settings.json) stays in
 # .devserver/ between runs.
-using BonitoAgents, CommunityManager
+using BonitoAgents
 
-h = BonitoAgents.dev_server(; port = 8139, dir = joinpath(dirname(@__DIR__), ".devserver"),
-                            apps = (BonitoAgents.BUILTIN_APPS..., CommunityApp))
+h = BonitoAgents.dev_server(; port = 8139, dir = joinpath(dirname(@__DIR__), ".devserver"))
 BonitoAgents.wait!(h)
