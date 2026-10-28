@@ -8,6 +8,6 @@ BonitoCommunity = "4c5af91b-b856-41fb-93f5-384ee8ea9157"
 
 [sources]
 Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
-BonitoAgents = {path = "../../AgentsDev/dev/BonitoAgents/BonitoAgents"}
-BonitoWorker = {path = "../../AgentsDev/dev/BonitoAgents/BonitoWorker"}
+BonitoAgents = {path = "../../../../AgentsDev/dev/BonitoAgents/BonitoAgents"}
+BonitoWorker = {path = "../../../../AgentsDev/dev/BonitoAgents/BonitoWorker"}
 BonitoCommunity = {path = ".."}

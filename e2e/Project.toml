@@ -18,9 +18,9 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
-BonitoAgents = {path = "../../AgentsDev/dev/BonitoAgents/BonitoAgents"}
-BonitoMCP = {path = "../../AgentsDev/dev/BonitoAgents/BonitoMCP"}
-BonitoWorker = {path = "../../AgentsDev/dev/BonitoAgents/BonitoWorker"}
+BonitoAgents = {path = "../../../../AgentsDev/dev/BonitoAgents/BonitoAgents"}
+BonitoMCP = {path = "../../../../AgentsDev/dev/BonitoAgents/BonitoMCP"}
+BonitoWorker = {path = "../../../../AgentsDev/dev/BonitoAgents/BonitoWorker"}
 BonitoCommunity = {path = ".."}
 ElectronCall = {url = "https://github.com/IanButterworth/ElectronCall.jl.git", rev = "sd/testsuite"}
-MockACP = {path = "../../AgentsDev/dev/BonitoAgents/BonitoAgents/test/MockACP"}
+MockACP = {path = "../../../../AgentsDev/dev/BonitoAgents/BonitoAgents/test/MockACP"}
