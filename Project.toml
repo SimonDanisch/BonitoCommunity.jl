@@ -12,16 +12,20 @@ HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
+libsodium_jll = "a9144af2-ca23-56d9-984f-0d03f7b5ccf8"
 
 [sources]
 Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
-BonitoAgents = {path = "../../../AgentsDev/dev/BonitoAgents/BonitoAgents"}
+BonitoAgents = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main"}
+
+[compat]
+libsodium_jll = "1.0.21"
+
+[bonitoagents]
+plugin = true
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
-
-[bonitoagents]
-plugin = true

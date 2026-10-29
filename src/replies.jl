@@ -67,6 +67,10 @@ end
 
 "Check every watched post that is due; what failed, as messages. Each check runs on its own: one failing doesn't stop the rest."
 function poll_replies!(app::CommunityApp)
+    # A periodic task must never unlock credentials. A manual, PIN-authorised
+    # action can add a dedicated refresh later; until then this is deliberately
+    # silent while locked.
+    vault_active(app) || return String[]
     t = now(UTC)
     problems = String[]
     for (d, post, a) in watched_posts(app)
@@ -89,6 +93,9 @@ function poll!(app::CommunityApp)
     app.notice[] = isempty(problems) ? "" : "Checking failed for " * join(problems, "; ")
     return nothing
 end
+
+"Fetch post statistics, replies and mentions during one explicit PIN-authorised action."
+poll_with_pin!(app::CommunityApp, pin::AbstractString) = with_vault!(() -> poll!(app), app, pin)
 
 function start_polling!(app::CommunityApp)
     app.poller = Timer(_ -> poll!(app), 20; interval = 60)
@@ -137,10 +144,12 @@ function send_answer!(app::CommunityApp, ref::AbstractString)
 end
 
 function send_in_background!(app::CommunityApp, ref::AbstractString)
+    throw(AppError("sending an answer needs an explicit PIN-authorised dashboard action"))
+end
+
+function send_answer_with_pin!(app::CommunityApp, ref::AbstractString, pin::AbstractString)
     find_reply(app, ref).status == "drafted" || throw(AppError("draft an answer first"))
-    errormonitor(Threads.@spawn begin
-        r = attempt(() -> send_answer!(app, ref), "answering $ref")
-        r isa Reply || (app.notice[] = "Sending an answer failed: $r")
-    end)
-    return nothing
+    return with_vault!(app, pin) do
+        send_answer!(app, ref)
+    end
 end

@@ -149,6 +149,7 @@ function poll_inbox!(app::CommunityApp)
     mark(key) = lock(() -> (app.inbox_polled[key] = t), app.lock)
     for a in app.state[].accounts
         publishes(find_platform(a.platform)) || continue
+        vault_active(app) || continue       # never wake credentials in a timer
         key = "mentions:" * a.id
         due(key) || continue
         mark(key)
@@ -208,10 +209,12 @@ function send_item!(app::CommunityApp, ref::AbstractString)
 end
 
 function send_item_in_background!(app::CommunityApp, ref::AbstractString)
+    throw(AppError("sending an answer needs an explicit PIN-authorised dashboard action"))
+end
+
+function send_item_with_pin!(app::CommunityApp, ref::AbstractString, pin::AbstractString)
     find_item(app, ref).status == "drafted" || throw(AppError("draft an answer first"))
-    errormonitor(Threads.@spawn begin
-        r = attempt(() -> send_item!(app, ref), "answering $ref")
-        r isa InboxItem || (app.notice[] = "Sending an answer failed: $r")
-    end)
-    return nothing
+    return with_vault!(app, pin) do
+        send_item!(app, ref)
+    end
 end

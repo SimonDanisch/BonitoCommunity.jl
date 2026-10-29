@@ -11,9 +11,9 @@ struct Brand
 end
 
 const DEFAULT_BRANDS = [
-    Brand("Makie", ["bluesky", "mastodon", "linkedin"],
+    Brand("Makie", ["bluesky", "mastodon", "linkedin", "discourse"],
           "The Makie.jl plotting library. Blog: MakieOrg/Website (src/blogposts), published on makie.org."),
-    Brand("Bonito", ["bluesky", "mastodon", "linkedin"],
+    Brand("Bonito", ["bluesky", "mastodon", "linkedin", "discourse"],
           "Bonito.jl, the web framework behind WGLMakie and BonitoAgents. Blog: Bonito.jl docs/blog."),
     Brand("Makie4Science", ["youtube", "tiktok", "instagram", "facebook", "bluesky", "mastodon", "linkedin"],
           "Videos on how research figures and animations are made with Makie. Its own accounts on the video " *

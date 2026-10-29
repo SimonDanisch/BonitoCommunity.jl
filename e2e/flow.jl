@@ -73,6 +73,7 @@ js(s, code) = TK.eval_js(s, code)
 s = TK.dev_server(; agent, dir, apps = (BT.BUILTIN_APPS..., CommunityApp), browser_width = 1600, browser_height = 1000)
 try
     app = s.h.state.apps["community"]
+    CM.create_vault!(app, "e2e-only PIN")
     for _ in 1:240
         any(isopen, values(s.h.state.workers[])) && break
         sleep(0.5)
@@ -126,7 +127,7 @@ try
     shot(s, "2b-release-project")
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
     shot(s, "3-accounts")
-    js(s, "document.querySelector('[data-box=youtube]').scrollIntoView(); true")
+    js(s, "document.querySelector('.cm-platform-grid').scrollIntoView(); true")
     shot(s, "3b-accounts-youtube-meta")
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
 

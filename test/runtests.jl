@@ -7,6 +7,7 @@ import HTTP, JSON
 using BonitoAgents, BonitoCommunity
 const BT = BonitoAgents
 const CM = BonitoCommunity
+const PIN = "test community pin"
 
 # What the stubbed Mastodon was asked to do, and the replies it hands out.
 const NET = (posted = Any[], reposted = Any[], answered = Any[], replies = Any[], mentions = Any[])
@@ -35,7 +36,9 @@ function test_server()
                                           "/home/u/p", :online, now())
     overview = BT.add_project!(server, BT.ProjectInfo("c1", "community", "w", mktempdir(), "/home/u/p/community", now(UTC)))
     overview.app = "community"
-    return server, server.apps["community"], projects
+    app = server.apps["community"]
+    CM.create_vault!(app, PIN)
+    return server, app, projects
 end
 
 # `caller` is the calling chat (its ProjectInfo); the request names it by id.
@@ -63,6 +66,8 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test_throws BT.AppError CM.check_draft_text(CM.Bluesky(), "", "x"^301)
         @test_throws BT.AppError CM.check_draft_text(CM.Mastodon(), "a title", "text")
         @test CM.check_draft_text(CM.YouTube(), "A title", "desc") === nothing
+        @test CM.check_draft_text(CM.Discourse(), "BonitoAgents is here", "A Markdown release announcement.") === nothing
+        @test_throws BT.AppError CM.check_draft_text(CM.Discourse(), "x"^121, "body")
         @test_throws BT.AppError CM.check_draft_media(CM.Bluesky(), ["a.mp4"])
         @test CM.account_server(CM.Mastodon(), "makie@fosstodon.org", "") == "https://fosstodon.org"
         @test CM.account_server(CM.Bluesky(), "makie.org", "") == "https://bsky.social"
@@ -148,30 +153,29 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
     end
 
     @testset "accounts: checked with the platform, secrets apart" begin
-        @test_throws BT.AppError CM.add_account!(app, "mastodon", "Makie4Science", "m4s@fosstodon.org", "", "post", "bad")
-        a = CM.add_account!(app, "mastodon", "Makie4Science", "@m4s@fosstodon.org", "", "post", "good")
+        @test_throws BT.AppError CM.add_account_with_pin!(app, "mastodon", "Makie4Science", "m4s@fosstodon.org", "", "post", "bad", PIN)
+        a = CM.add_account_with_pin!(app, "mastodon", "Makie4Science", "@m4s@fosstodon.org", "", "post", "good", PIN)
         @test a.id == "mastodon:m4s@fosstodon.org" && a.server == "https://fosstodon.org"
-        CM.add_account!(app, "mastodon", "Makie", "makie@fosstodon.org", "", "post", "good")
-        CM.add_account!(app, "mastodon", "", "sim@julialang.social", "", "amplify", "good")
-        CM.add_account!(app, "mastodon", "Bonito", "bonito@fosstodon.org", "", "post", "good")
-        @test_throws BT.AppError CM.add_account!(app, "mastodon", "", "x@y.org", "", "post", "good")   # posts for a brand
-        @test_throws BT.AppError CM.add_account!(app, "linkedin", "Makie", "simon", "", "post", "good") # posted by hand
-        @test CM.secret(app, a) == "good"
+        CM.add_account_with_pin!(app, "mastodon", "Makie", "makie@fosstodon.org", "", "post", "good", PIN)
+        CM.add_account_with_pin!(app, "mastodon", "", "sim@julialang.social", "", "amplify", "good", PIN)
+        CM.add_account_with_pin!(app, "mastodon", "Bonito", "bonito@fosstodon.org", "", "post", "good", PIN)
+        @test_throws BT.AppError CM.add_account_with_pin!(app, "mastodon", "", "x@y.org", "", "post", "good", PIN)   # posts for a brand
+        @test_throws BT.AppError CM.add_account_with_pin!(app, "linkedin", "Makie", "simon", "", "post", "good", PIN) # posted by hand
+        @test CM.with_vault!(() -> CM.secret(app, a), app, PIN) == "good"
         @test !occursin("good", read(app.file, String))
         @test filemode(app.secrets_file) & 0o777 == 0o600
+        @test !occursin("good", read(app.secrets_file, String)) && !CM.vault_active(app)
+        @test_throws BT.AppError CM.with_vault!(() -> CM.secret(app, a), app, "wrong pin")
     end
 
     @testset "publishing: the original, the reposts, the project moves on" begin
         @test_throws BT.AppError CM.publish_draft!(app, 1)                 # not approved
         @test_throws BT.AppError CM.publish_draft!(app, 2)                 # links to a video not set yet
         CM.set_link!(app, p.id, "youtube", "https://youtu.be/bh")
-        CM.publish_in_background!(app, 2)
-        @test_throws BT.AppError CM.publish_in_background!(app, 2)         # claimed: no second post
-        for _ in 1:100
-            d = CM.find_draft(app, 2)
-            d.status == "published" && length(d.posts) == 3 && break
-            sleep(0.05)
-        end
+        @test_throws BT.AppError CM.publish_with_pin!(app, 2, "wrong pin")
+        @test CM.find_draft(app, 2).status == "approved"                 # a bad PIN never changes a release
+        CM.publish_with_pin!(app, 2, PIN)
+        @test_throws BT.AppError CM.publish_with_pin!(app, 2, PIN)
         d2 = CM.find_draft(app, 2)
         @test d2.status == "published"
         @test NET.posted == [("mastodon:m4s@fosstodon.org", "A black hole, rendered with Makie: https://youtu.be/bh #julialang")]
@@ -185,6 +189,15 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         CM.mark_published!(app, 1, "https://youtu.be/bh")
         @test CM.find_draft(app, 1).posts[1].url == "https://youtu.be/bh"
         @test CM.find_project(app, p.id).state == "community"
+
+        # A release-wide send validates every target, then sends each approved
+        # automatic post during one explicit PIN lease.
+        d3 = CM.save_draft!(app, p.id; brand = "Makie4Science", platform = "mastodon", kind = "post",
+                             title = "", text = "A second release post", media = String[])
+        CM.review_draft!(app, d3.id, "approved")
+        sent = CM.publish_approved_with_pin!(app, p.id, PIN)
+        @test length(sent) == 1 && only(sent).status == "published"
+        @test CM.find_draft(app, d3.id).status == "published"
     end
 
     @testset "replies: checked, answered, not our own" begin
@@ -192,17 +205,17 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
                             text = "How long did it render?", url = "https://mastodon.social/@fan/301", created = now(UTC)),
                            (ref = "302", cid = "", author = "makie@fosstodon.org", author_name = "Makie",
                             text = "Thanks!", url = "https://fosstodon.org/@makie/302", created = now(UTC)))
-        CM.poll_replies!(app)
+        CM.with_vault!(() -> CM.poll_replies!(app), app, PIN)
         rs = CM.project_replies(app.state[], p.id)
         @test CM.find_draft(app, 2).posts[1].stats == Dict("likes" => 12, "reposts" => 3, "replies" => 1)
         @test length(CM.find_draft(app, 2).posts) == 3                     # the reposts kept
-        @test CM.stats_total(CM.project_drafts(app.state[], p.id))["likes"] == 12
+        @test CM.stats_total(CM.project_drafts(app.state[], p.id))["likes"] == 24
         @test [r.ref for r in rs] == ["301"] && rs[1].status == "new" && rs[1].account == "mastodon:m4s@fosstodon.org"
-        CM.poll_replies!(app)                                              # not due again yet, and nothing twice
+        CM.with_vault!(() -> CM.poll_replies!(app), app, PIN)              # not due again yet, and nothing twice
         @test length(app.state[].replies) == 1
         @test occursin("How long did it render?", call(server, chat, "project_replies"))
         @test occursin("Drafted", call(server, chat, "project_answer"; ref = "301", text = "About 2 hours on one GPU."))
-        CM.send_answer!(app, "301")
+        CM.send_answer_with_pin!(app, "301", PIN)
         @test NET.answered == [("mastodon:m4s@fosstodon.org", "301", "About 2 hours on one GPU.")]
         @test CM.find_reply(app, "301").status == "answered"
         @test occursin("No open replies", call(server, chat, "project_replies"))
@@ -219,17 +232,17 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
                                mention("402", "fan@mastodon.social", "@makie congrats!"; parent = "101"),   # a project's reply
                                mention("403", "sim@julialang.social", "@makie see this"),                  # ours
                                mention("404", "old@x.org", "@makie hi"; age = Day(9))])                    # too old
-        @test isempty(CM.poll_inbox!(app))
+        @test isempty(CM.with_vault!(() -> CM.poll_inbox!(app), app, PIN))
         inbox = app.state[].inbox
         @test [x.ref for x in inbox] == ["mastodon:401"]
         @test inbox[1].account == "mastodon:makie@fosstodon.org" && inbox[1].brand == "Makie" && inbox[1].kind == "mention"
-        CM.poll_inbox!(app)                                                 # not due again: nothing twice
+        CM.with_vault!(() -> CM.poll_inbox!(app), app, PIN)                # not due again: nothing twice
         @test length(app.state[].inbox) == 1
         overview = server.projects[]["c1"]
         @test occursin("3D histogram", call(server, overview, "cm_inbox"))
         @test occursin("Drafted", call(server, overview, "cm_answer"; ref = "mastodon:401",
                                        text = "`hist3d` isn't built in, but `barplot` with 3D bars does it."))
-        CM.send_item!(app, "mastodon:401")
+        CM.send_item_with_pin!(app, "mastodon:401", PIN)
         @test NET.answered[end] == ("mastodon:makie@fosstodon.org", "401", "`hist3d` isn't built in, but `barplot` with 3D bars does it.")
         @test CM.find_item(app, "mastodon:401").status == "answered"
         @test occursin("Nothing open", call(server, overview, "cm_inbox"))
@@ -283,13 +296,13 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         q = HTTP.queryparams(HTTP.URI(url))
         @test q["redirect_uri"] == "http://127.0.0.1:5555" && q["access_type"] == "offline" &&
               q["code_challenge_method"] == "S256" && occursin("youtube.upload", q["scope"])
-        @test_throws BT.AppError CM.set_google_client!(app, "not-a-client", "x")
+        @test_throws BT.AppError CM.set_google_client_with_pin!(app, "not-a-client", "x", PIN)
         @test_throws BT.AppError CM.start_youtube_login!(app, "Makie4Science")          # no client yet
-        CM.set_google_client!(app, "123.apps.googleusercontent.com", "shh")
-        @test CM.google_client(app) == ("123.apps.googleusercontent.com", "shh")
-        @test_throws BT.AppError CM.start_youtube_login!(app, "Bonito")                 # Bonito isn't on YouTube
+        CM.set_google_client_with_pin!(app, "123.apps.googleusercontent.com", "shh", PIN)
+        @test CM.with_vault!(() -> CM.google_client(app), app, PIN) == ("123.apps.googleusercontent.com", "shh")
+        @test_throws BT.AppError CM.with_vault!(() -> CM.start_youtube_login!(app, "Bonito"), app, PIN) # Bonito isn't on YouTube
         # the login's listener: Google sends the user back with an error
-        login = HTTP.URI(CM.start_youtube_login!(app, "Makie4Science"))
+        login = HTTP.URI(CM.with_vault!(() -> CM.start_youtube_login!(app, "Makie4Science"), app, PIN))
         lq = HTTP.queryparams(login)
         r = HTTP.get(lq["redirect_uri"] * "/?state=wrong&code=x"; status_exception = false)
         @test r.status == 400
@@ -385,6 +398,8 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         for f in (:projects, :drafts, :accounts, :replies, :inbox)
             @test all(splat(same), zip(getfield(again.state[], f), getfield(app.state[], f)))
         end
-        @test again.state[].next_draft == 3
+        @test again.state[].next_draft == 4
+        @test !CM.vault_active(again)
+        @test_throws BT.AppError CM.secret(again, CM.find_account(again, "mastodon:m4s@fosstodon.org"))
     end
 end

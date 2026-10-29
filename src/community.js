@@ -8,6 +8,29 @@
 
 export function connect(root, data, act, feedback, navigate) {
     const send = (name, id = null, value = null) => act.notify([name, id, value]);
+    const askPin = (title, confirm = false) => new Promise(resolve => {
+        const dialog = el('dialog', 'cm-pin-dialog');
+        const form = el('form', 'cm-pin-form', {method: 'dialog'});
+        const first = el('input', 'cm-input', {type: 'password', autocomplete: 'new-password', placeholder: 'Community PIN'});
+        const second = confirm ? el('input', 'cm-input', {type: 'password', autocomplete: 'new-password', placeholder: 'Repeat PIN'}) : null;
+        const error = el('div', 'cm-hint');
+        const cancel = btn('Cancel', 'bt-btn-ghost', '');
+        cancel.value = 'cancel';
+        const submit = btn(confirm ? 'Set PIN' : 'Continue', 'bt-btn-primary', '');
+        submit.value = 'ok';
+        form.append(el('div', 'cm-h2', {}, title), el('div', 'cm-hint', {}, confirm ?
+            'This PIN encrypts platform credentials. It is never stored; losing it means reconnecting accounts.' :
+            'Credentials will be decrypted only for this one action.'), first, second, error, div('cm-row', submit, cancel));
+        cancel.addEventListener('click', () => dialog.close('cancel'));
+        submit.addEventListener('click', () => {
+            if (!first.value) { error.textContent = 'Enter the Community PIN.'; return; }
+            if (second && first.value !== second.value) { error.textContent = 'The PINs do not match.'; return; }
+            dialog.close('ok');
+        });
+        dialog.addEventListener('close', () => { const pin = dialog.returnValue === 'ok' ? first.value : null; dialog.remove(); resolve(pin); });
+        document.body.append(dialog); dialog.showModal(); first.focus();
+    });
+    const pinAction = (title, action, id, value = {}) => askPin(title).then(pin => pin && send(action, id, {...value, pin}));
     const ui = {filter: 'all', showNew: false, showAccounts: false, showHandled: false, marking: null, changing: null};
     const regions = new Map();      // key -> {node, sig}
     let current = data.value;
@@ -83,8 +106,7 @@ export function connect(root, data, act, feedback, navigate) {
             case 'inbox-send': {
                 const text = box.querySelector('[name=answer]').value.trim();
                 if (!text) return;
-                send('inbox_answer', id, text);
-                return send('inbox_send', id);
+                return pinAction('Send this answer?', 'inbox_send', id, {text});
             }
             case 'filter': ui.filter = b.dataset.value; return rerender();
             case 'create': {
@@ -96,11 +118,11 @@ export function connect(root, data, act, feedback, navigate) {
             }
             case 'google-client': {
                 const v = name => box.querySelector(`[name=${name}]`).value.trim();
-                return send('google_client', null, {client_id: v('client_id'), client_secret: v('client_secret')});
+                return pinAction('Unlock to save the Google client', 'google_client', null, {client_id: v('client_id'), client_secret: v('client_secret')});
             }
             case 'add-meta': {
                 const token = box.querySelector('[name=page_token]');
-                send('add_meta', null, {brand: box.querySelector('[name=meta_brand]').value, token: token.value.trim()});
+                pinAction('Unlock to check Facebook and Instagram', 'add_meta', null, {brand: box.querySelector('[name=meta_brand]').value, token: token.value.trim()});
                 token.value = '';
                 return;
             }
@@ -108,12 +130,17 @@ export function connect(root, data, act, feedback, navigate) {
                 ui.loginTab = window.open('', '_blank');
                 return send('connect_youtube', null, box.querySelector('[name=yt_brand]').value);
             case 'add-account': {
-                const v = name => box.querySelector(`[name=${name}]`).value.trim();
-                send('add_account', null, {platform: v('platform'), brand: v('brand'), role: v('role'),
-                                           handle: v('handle'), server: v('server'), secret: v('secret')});
-                box.querySelector('[name=secret]').value = '';
+                const role = b.dataset.role;
+                const form = role === 'amplify' ? b.closest('details').querySelector('[data-account-form=amplify]') : box.querySelector('[data-account-form=post]');
+                const v = name => form.querySelector(`[name=${name}]`)?.value.trim() || '';
+                pinAction('Unlock to check and add this account', 'add_account', null, {platform: b.dataset.platform, brand: role === 'amplify' ? '' : v('brand'), role,
+                                           handle: v('handle'), server: '', secret: v('secret')});
+                form.querySelector('[name=secret]').value = '';
                 return;
             }
+            case 'set-pin': return askPin('Set Community PIN', true).then(pin => pin && send('set_pin', null, pin));
+            case 'check-updates': return askPin('Check replies and mentions now').then(pin => pin && send('check_updates', null, pin));
+            case 'remove-account': return pinAction('Unlock to remove this account', 'remove_account', id);
             case 'brand': {
                 b.classList.toggle('cm-on');
                 const group = b.closest('[data-brands]');
@@ -140,9 +167,10 @@ export function connect(root, data, act, feedback, navigate) {
             case 'send': {
                 const text = box.querySelector('[name=answer]').value.trim();
                 if (!text) return;
-                send('answer', id, text);
-                return send('send', id);
+                return pinAction('Send this answer?', 'send', id, {text});
             }
+            case 'publish': return pinAction('Publish this approved post?', 'publish', num);
+            case 'publish-all': return pinAction('Publish every approved automatic post in this release?', 'publish_all', id);
             case 'open-card': return b.dataset.chat ? send('open', b.dataset.chat) : null;
             default:
                 return send(a, b.dataset.num !== undefined ? Number(b.dataset.num) : id, b.dataset.value ?? null);
@@ -356,57 +384,94 @@ function newProject(d) {
     return box;
 }
 
-const SERVER_HINT = {bluesky: 'https://bsky.social (default)', mastodon: 'from the handle, e.g. https://fosstodon.org'};
-const SECRET_HINT = {
-    bluesky: 'Bluesky: Settings → Privacy and security → App passwords. Never your real password.',
-    mastodon: 'Mastodon: Preferences → Development → New application, scopes read and write; paste its access token.',
-};
+const field = (label, input) => { const f = el('label', 'cm-field'); f.append(label, input); return f; };
+const select = (name, options) => { const s = el('select', 'cm-select', {name}); for (const [v, label] of options) s.append(el('option', '', {value: v}, label)); return s; };
+const credentialSteps = (...items) => { const list = el('ol', 'cm-credential-steps'); list.append(...items.map(x => el('li', '', {}, x))); return list; };
 
-// Kept deliberately brief: this is the checklist someone needs while setting a
-// platform up, not a second copy of each platform's developer documentation.
-function setupGuide() {
-    const step = (name, text) => div('cm-setup-step', el('strong', '', {}, name), el('span', '', {}, text));
-    return div('cm-setup',
-        el('div', 'cm-h2', {}, 'Set up an account'),
-        step('Bluesky', 'Create an app password in Settings → Privacy and security; add your handle and that password below.'),
-        step('Mastodon', 'Create an app in Preferences → Development with read + write scopes; add its access token below.'),
-        step('YouTube', 'Create a Google Cloud Desktop OAuth client with YouTube Data API v3, save it below, then connect the channel.'),
-        step('Facebook + Instagram', 'Create a long-lived Facebook Page token with the listed permissions; the linked Instagram account is found automatically.'),
-        step('TikTok + LinkedIn', 'No credentials needed: copy an approved draft, post it there, then paste its published link back here.'));
+function configuredAccounts(d, platform) {
+    const list = d.accounts.filter(a => a.platform === platform);
+    return list.length ? div('cm-configured', ...list.map(a => div('cm-account',
+        el('span', 'cm-account-handle', {title: a.server}, '@' + a.handle),
+        a.brand ? brandPill(a.brand) : el('span', 'cm-pill', {}, 'personal reposts'),
+        btn('Remove', 'bt-btn-ghost', 'remove_account', {'data-id': a.id})))) :
+        el('div', 'cm-hint', {}, 'Not connected yet.');
+}
+
+function brandSelect(d, platform) {
+    return select('brand', (d.brand_platforms ? d.brands.filter(b => (d.brand_platforms[b] || []).includes(platform)) : d.brands).map(b => [b, b]));
+}
+
+function networkCard(d, platform, title, instructions, handleLabel, handlePlaceholder, secretLabel) {
+    const card = el('section', 'cm-card cm-platform-card', {'data-box': `account-${platform}`});
+    const form = div('cm-form-grid',
+        field('Post as', brandSelect(d, platform)),
+        field(handleLabel, el('input', 'cm-input', {name: 'handle', type: 'text', placeholder: handlePlaceholder, autocomplete: 'off'})),
+        field(secretLabel, el('input', 'cm-input', {name: 'secret', type: 'password', autocomplete: 'new-password'})));
+    form.setAttribute('data-account-form', 'post');
+    card.append(div('cm-platform-head', platformBadge(d.platforms, platform), div('', el('div', 'cm-h2', {}, title), el('div', 'cm-sub', {}, 'Automatic publishing'))),
+        configuredAccounts(d, platform), credentialSteps(...instructions), form,
+        div('cm-row', btn(`Check and connect ${title}`, 'bt-btn-primary', 'add-account', {'data-platform': platform, 'data-role': 'post'})));
+    const amplify = el('details', 'cm-amplify');
+    const personal = div('cm-form-grid',
+        field(handleLabel, el('input', 'cm-input', {name: 'handle', type: 'text', placeholder: handlePlaceholder, autocomplete: 'off'})),
+        field(secretLabel, el('input', 'cm-input', {name: 'secret', type: 'password', autocomplete: 'new-password'})));
+    personal.setAttribute('data-account-form', 'amplify');
+    amplify.append(el('summary', '', {}, 'Optional: add a personal account that reposts releases'),
+        el('div', 'cm-hint', {}, 'This account does not create brand posts. It only reposts the approved post after it goes out.'), personal,
+        div('cm-row', btn('Check and add repost account', 'bt-btn-secondary', 'add-account', {'data-platform': platform, 'data-role': 'amplify'})));
+    card.append(amplify);
+    return card;
+}
+
+function manualCard(d, platform, title, text) {
+    const card = el('section', 'cm-card cm-platform-card cm-platform-manual');
+    card.append(
+        div('cm-platform-head', platformBadge(d.platforms, platform), div('', el('div', 'cm-h2', {}, title), el('div', 'cm-sub', {}, 'Manual posting — no credentials stored'))),
+        el('div', 'cm-manual-copy', {}, text));
+    return card;
+}
+
+function metaCard(d) {
+    const card = el('section', 'cm-card cm-platform-card', {'data-box': 'meta'});
+    card.append(div('cm-platform-head', platformBadge(d.platforms, 'facebook'), platformBadge(d.platforms, 'instagram'),
+        div('', el('div', 'cm-h2', {}, 'Facebook Page + Instagram'), el('div', 'cm-sub', {}, 'One optional Page token covers both'))),
+        el('div', 'cm-hint', {}, 'Not needed for this announcement. Meta automation is optional and substantially more involved than the other platforms.'),
+        credentialSteps('Create a Meta Business app and a Facebook Page token with Page publishing plus Instagram content-publishing permissions.',
+              'Link a Professional Instagram account to that Facebook Page.',
+              'Paste the Page token below. Community verifies the Page and discovers the linked Instagram account.'),
+        div('cm-form-grid', field('Post as', brandSelect(d, 'facebook')),
+            field('Facebook Page access token', el('input', 'cm-input', {name: 'page_token', type: 'password', autocomplete: 'new-password'}))),
+        div('cm-row', btn('Check and connect Page', 'bt-btn-primary', 'add-meta')));
+    return card;
+}
+
+function youtubeCard(d) {
+    const card = el('section', 'cm-card cm-platform-card cm-platform-manual');
+    card.append(
+        div('cm-platform-head', platformBadge(d.platforms, 'youtube'), div('', el('div', 'cm-h2', {}, 'YouTube'), el('div', 'cm-sub', {}, 'Optional — not needed for this announcement'))),
+        credentialSteps('In Google Cloud, create a project and enable YouTube Data API v3.', 'Configure the OAuth consent screen and create a Desktop OAuth client.',
+              'Save its client ID and secret, then connect the channel in a PIN-authorised browser login.'),
+        el('div', 'cm-hint', {}, 'The PIN-safe channel-login continuation is the remaining YouTube setup item; do not enter credentials here yet.'));
+    return card;
 }
 
 function accounts(d) {
     const box = el('div', 'cm-card cm-panel', {'data-box': 'accounts'});
-    const list = el('div', 'cm-accounts');
-    for (const a of d.accounts) {
-        list.append(div('cm-account', platformBadge(d.platforms, a.platform, true),
-            el('span', 'cm-account-handle', {title: a.server}, '@' + a.handle),
-            a.brand ? brandPill(a.brand) : el('span', 'cm-pill', {}, 'personal'),
-            el('span', 'cm-pill', {}, a.role === 'post' ? 'posts' : 'reposts'),
-            btn('Remove', 'bt-btn-ghost', 'remove_account', {'data-id': a.id})));
+    box.append(el('div', 'cm-h2', {}, 'Publishing accounts'),
+        el('div', 'cm-hint', {}, 'Only Bluesky and Mastodon need setup for the first BonitoAgents announcement. Each credential is encrypted and requested again only for the action that uses it.'));
+    if (!d.vault_set) {
+        box.append(el('div', 'cm-vault-callout', {}, 'First set a Community PIN. It encrypts credentials but is never stored.'),
+            div('cm-row', btn('Set Community PIN', 'bt-btn-primary', 'set-pin')));
+        return box;
     }
-    if (!d.accounts.length) list.append(el('div', 'cm-empty', {}, 'No accounts yet. The app publishes to Bluesky and Mastodon with them; the other platforms are posted by hand.'));
-    const select = (name, options) => {
-        const s = el('select', 'cm-select', {name});
-        for (const [v, label] of options) s.append(el('option', '', {value: v}, label));
-        return s;
-    };
-    const field = (label, input) => { const f = el('label', 'cm-field'); f.append(label, input); return f; };
-    const platform = select('platform', d.platforms.filter(p => p.publishes && p.id !== 'youtube').map(p => [p.id, p.name]));
-    const server = el('input', 'cm-input', {name: 'server', type: 'text', placeholder: SERVER_HINT[platform.value]});
-    const hint = el('div', 'cm-hint', {}, SECRET_HINT[platform.value]);
-    platform.addEventListener('change', () => { server.placeholder = SERVER_HINT[platform.value]; hint.textContent = SECRET_HINT[platform.value]; });
-    const form = div('cm-form-grid',
-        field('Platform', platform),
-        field('Brand', select('brand', [...d.brands.map(b => [b, b]), ['', 'Personal']])),
-        field('Role', select('role', [['post', "Posts the brand's drafts"], ['amplify', 'Reposts them']])),
-        field('Handle', el('input', 'cm-input', {name: 'handle', type: 'text', placeholder: 'makie.org · makie@fosstodon.org', autocomplete: 'off'})),
-        field('Server', server),
-        field('App password / token', el('input', 'cm-input', {name: 'secret', type: 'password', autocomplete: 'new-password'})));
-    box.append(el('div', 'cm-h2', {}, 'Accounts'), list, setupGuide(), el('div', 'cm-h2', {}, 'Add a Bluesky or Mastodon account'), form, hint,
-        div('cm-row', btn('Check and add', 'bt-btn-primary', 'add-account'), btn('Close', 'bt-btn-ghost', 'toggle-accounts')),
-        el('div', 'cm-hint', {}, 'Each brand has one posting account per platform; every other account on that platform reposts what it publishes.'),
-        youtubeAccounts(d, select, field), metaAccounts(d, select, field));
+    const grid = el('div', 'cm-platform-grid');
+    grid.append(
+        networkCard(d, 'bluesky', 'Bluesky', ['Open Settings → Privacy and security → App passwords.', 'Create an app password named “Community”; never use your normal password.', 'Enter the handle and app password below.'], 'Bluesky handle', 'makie.org', 'App password'),
+        networkCard(d, 'mastodon', 'Mastodon', ['Open your instance → Preferences → Development → New application.', 'Grant read and write scopes, then copy its access token.', 'Enter the full handle including its instance; no separate server field is needed.'], 'Full Mastodon handle', 'makie@fosstodon.org', 'Access token'),
+        manualCard(d, 'linkedin', 'LinkedIn', 'Approve the draft, use Copy text, publish it in LinkedIn, then paste the resulting post URL back into Community.'),
+        manualCard(d, 'discourse', 'Discourse', 'No credential is needed. Each release gets its own reviewable forum-topic draft: copy it into Discourse, publish it, then paste the topic URL back here.'),
+        youtubeCard(d), metaCard(d));
+    box.append(grid, div('cm-row', btn('Close', 'bt-btn-ghost', 'toggle-accounts')));
     return box;
 }
 
@@ -415,6 +480,7 @@ function inboxSection(d, ui) {
     const handled = d.inbox.length - open.length;
     const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Inbox'),
         el('span', 'cm-sub', {}, open.length ? `${open.length} open` : ''), el('span', 'cm-spacer'),
+        btn('Check updates', 'bt-btn-ghost', 'check-updates', {title: 'Unlock credentials only while checking replies and mentions'}),
         handled ? el('button', 'cm-filter' + (ui.showHandled ? ' cm-filter-on' : ''), {type: 'button', 'data-act': 'toggle-handled'},
                      `Handled ${handled}`) : null,
         open.length ? btn('Draft answers', 'bt-btn-secondary', 'inbox_ask_all', {title: "Ask the overview's agent to draft answers to the open items"}) : null);
@@ -603,13 +669,16 @@ const inFilter = (f, x) => f === 'all' || (f === 'review' ? ['draft', 'changes',
 function draftSection(d, p, ui) {
     const drafts = p.drafts.filter(x => inFilter(ui.filter, x));
     const toApprove = p.drafts.filter(x => x.status === 'draft').length;
+    const readyToPublish = p.drafts.filter(x => x.status === 'approved' && x.publishes);
     const filters = el('div', 'cm-filters');
     for (const [k, label] of FILTERS) {
         const n = p.drafts.filter(x => inFilter(k, x)).length;
         filters.append(el('button', 'cm-filter' + (ui.filter === k ? ' cm-filter-on' : ''), {type: 'button', 'data-act': 'filter', 'data-value': k}, `${label} ${n}`));
     }
     const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Drafts'), filters, el('span', 'cm-spacer'),
-        toApprove ? btn(`Approve all (${toApprove})`, 'bt-btn-secondary', 'approve_all', {'data-id': p.id}) : null);
+        toApprove ? btn(`Approve all (${toApprove})`, 'bt-btn-secondary', 'approve_all', {'data-id': p.id}) : null,
+        readyToPublish.length ? btn(`Publish approved automatic posts (${readyToPublish.length})`, 'bt-btn-primary', 'publish-all', {'data-id': p.id,
+            title: 'Sends every approved post that has an automatic platform account. LinkedIn remains a deliberate manual copy-and-mark step.'}) : null);
     const grid = el('div', 'cm-drafts');
     // Grouped by platform, in the platforms' order.
     const order = d.platforms.map(x => x.id);
@@ -678,7 +747,8 @@ function draftCard(d, p, x, ui) {
             if (why) foot.append(el('span', 'cm-hint', {}, why));
         } else {
             const [post, comment] = x.final_text.split(/\n---\n/);
-            foot.append(btn('Copy text', 'bt-btn-primary', 'copy', {'data-value': post.trim(), title: `Copy, then post it on ${platformName(d.platforms, x.platform)}`}));
+            const manualText = x.platform === 'discourse' && x.title ? `${x.title}\n\n${post}` : post;
+            foot.append(btn('Copy text', 'bt-btn-primary', 'copy', {'data-value': manualText.trim(), title: `Copy, then post it on ${platformName(d.platforms, x.platform)}`}));
             if (comment) foot.append(btn('Copy comment', 'bt-btn-secondary', 'copy', {'data-value': comment.trim()}));
             foot.append(btn('Mark published', 'bt-btn-secondary', 'mark-open', {'data-id': x.id}));
         }

@@ -80,18 +80,72 @@ and publish it in a task: a click shouldn't wait on the network. A failure ends
 up on the draft.
 """
 function publish_in_background!(app::CommunityApp, id::Int)
-    update!(app) do s
-        drafts = copy(s.drafts)
-        i = draft_index(s, id)
-        d = drafts[i]
-        d.status == "approved" || throw(AppError("draft #$id is $(d.status); only approved drafts are published"))
-        publishes(find_platform(d.platform)) || throw(AppError("$(d.platform) is posted by hand"))
-        drafts[i] = change(d; status = "publishing", note = "", updated = now(UTC))
-        with(s; drafts)
+    throw(AppError("publishing needs an explicit PIN-authorised dashboard action"))
+end
+
+"Publish one approved draft while credentials are leased for this call only."
+function publish_with_pin!(app::CommunityApp, id::Int, pin::AbstractString)
+    claimed = false
+    try
+        return with_vault!(app, pin) do
+            update!(app) do s
+                drafts = copy(s.drafts)
+                i = draft_index(s, id)
+                d = drafts[i]
+                d.status == "approved" || throw(AppError("draft #$id is $(d.status); only approved drafts are published"))
+                publishes(find_platform(d.platform)) || throw(AppError("$(d.platform) is posted by hand"))
+                drafts[i] = change(d; status = "publishing", note = "", updated = now(UTC))
+                with(s; drafts)
+            end
+            claimed = true
+            publish_draft!(app, id)
+        end
+    catch e
+        claimed && find_draft(app, id).status != "published" &&
+            set_draft!(app, id; status = "failed", note = e isa AppError ? e.msg : sprint(showerror, e))
+        rethrow()
     end
-    errormonitor(Threads.@spawn begin
-        r = attempt(() -> publish_draft!(app, id), "publishing draft #$id")
-        r isa Draft || find_draft(app, id).status == "published" || set_draft!(app, id; status = "failed", note = r)
-    end)
-    return nothing
+end
+
+"The approved dashboard-postable drafts of one project, in dependency order."
+function publishable_drafts(app::CommunityApp, project_id::AbstractString)
+    drafts = filter(d -> d.project == project_id && d.status == "approved" && publishes(find_platform(d.platform)), app.state[].drafts)
+    isempty(drafts) && throw(AppError("there are no approved automatic posts for this release"))
+    # Link posts can depend on the video's URL, which its upload supplies.
+    sort!(drafts; by = d -> d.platform == "youtube" ? 0 : 1)
+    has_youtube = any(d -> d.platform == "youtube" && d.kind == "video", drafts)
+    for d in drafts
+        p = find_project(app, d.project)
+        missing = missing_links(d.text, p)
+        filter!(x -> !(x == "youtube" && has_youtube), missing)
+        isempty(missing) || throw(AppError("draft #$(d.id) needs the project's $(join(missing, " and ")) link before this release can be sent"))
+        posting_account(app, d.brand, d.platform)
+    end
+    return drafts
+end
+
+"Publish every approved automatic post for a release under one explicit PIN lease."
+function publish_approved_with_pin!(app::CommunityApp, project_id::AbstractString, pin::AbstractString)
+    targets = publishable_drafts(app, project_id) # validate the whole release before sending any post
+    return with_vault!(app, pin) do
+        result = Draft[]
+        for target in targets
+            id = target.id
+            update!(app) do s
+                drafts = copy(s.drafts)
+                i = draft_index(s, id)
+                d = drafts[i]
+                d.status == "approved" || throw(AppError("draft #$id changed while this release was being sent"))
+                drafts[i] = change(d; status = "publishing", note = "", updated = now(UTC))
+                with(s; drafts)
+            end
+            try
+                push!(result, publish_draft!(app, id))
+            catch e
+                set_draft!(app, id; status = "failed", note = e isa AppError ? e.msg : sprint(showerror, e))
+                push!(result, find_draft(app, id))
+            end
+        end
+        result
+    end
 end

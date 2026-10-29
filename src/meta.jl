@@ -46,6 +46,13 @@ function add_meta_accounts!(app::CommunityApp, brand::AbstractString, token::Abs
     return added
 end
 
+function add_meta_accounts_with_pin!(app::CommunityApp, brand::AbstractString, token::AbstractString, pin::AbstractString)
+    vault_exists(app) || throw(AppError("set a Community PIN before adding Facebook or Instagram"))
+    return with_vault!(app, pin) do
+        add_meta_accounts!(app, brand, token)
+    end
+end
+
 account_object(a::Account) = split(a.id, ':'; limit = 2)[2]      # the Page's or Instagram account's id
 
 # ── multipart, written out: Graph's video uploads take form fields and a file chunk ─

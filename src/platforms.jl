@@ -11,8 +11,9 @@ struct Facebook <: Platform end
 struct Bluesky <: Platform end
 struct Mastodon <: Platform end
 struct LinkedIn <: Platform end
+struct Discourse <: Platform end
 
-const PLATFORMS = (YouTube(), TikTok(), Instagram(), Facebook(), Bluesky(), Mastodon(), LinkedIn())
+const PLATFORMS = (YouTube(), TikTok(), Instagram(), Facebook(), Bluesky(), Mastodon(), LinkedIn(), Discourse())
 
 platform_id(p::Platform) = lowercase(platform_name(p))
 platform_name(p::Platform) = string(nameof(typeof(p)))
@@ -31,10 +32,12 @@ max_text(::Facebook) = 63206
 max_text(::Bluesky) = 300
 max_text(::Mastodon) = 500
 max_text(::LinkedIn) = 3000
+max_text(::Discourse) = 32000
 
 # Only YouTube has a separate title.
 max_title(::Platform) = 0
 max_title(::YouTube) = 100
+max_title(::Discourse) = 120
 
 "Whether the app publishes there itself; elsewhere the user posts by hand and pastes the link."
 publishes(::Platform) = false
@@ -76,6 +79,8 @@ role(::Mastodon) = "a short hook and a link to the YouTube video ($YOUTUBE_LINK)
                    "there. The other accounts boost it."
 role(::LinkedIn) = "posted by hand: a native clip, with the YouTube link ($YOUTUBE_LINK) in the first comment. " *
                    "The draft is the post text; put the comment after a line `---`."
+role(::Discourse) = "posted by hand as a new forum topic. Give it a concise title and a Markdown announcement; " *
+                    "include the relevant release or documentation link."
 
 function check_draft_text(p::Platform, title::AbstractString, text::AbstractString)
     n = text_length(p, text)

@@ -114,8 +114,8 @@ function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
     base = Dict{String,Any}(
         "brands" => brand_names(app), "states" => collect(PROJECT_STATES), "notice" => notice,
         "platforms" => platforms, "folder" => projects_dir(app),
-        "sources" => vcat(platforms, Dict{String,Any}("id" => "discourse", "name" => "Discourse", "color" => "#9558b2"),
-                          Dict{String,Any}("id" => "github", "name" => "GitHub", "color" => "#24292f")))
+        "brand_platforms" => Dict(b.name => b.platforms for b in app.settings.brands),
+        "sources" => vcat(platforms, Dict{String,Any}("id" => "github", "name" => "GitHub", "color" => "#24292f")))
     if isempty(d.project)
         base["mode"] = "overview"
         base["projects"] = [project_card(d, s, p) for p in reverse(s.projects)]   # newest first
@@ -126,7 +126,10 @@ function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
         handled = sort(filter(x -> !(x.status in ("new", "drafted")), s.inbox); by = x -> x.created, rev = true)
         base["inbox"] = [inbox_data(x) for x in vcat(open, first(handled, 30))]
         base["watches"] = [w.url for w in app.settings.watches]
-        base["google_client"] = !isempty(first(google_client(app)))
+        base["vault_set"] = vault_exists(app)
+        # Reading the client itself would unlock the vault; connection setup is
+        # deliberately unavailable until its PIN-safe OAuth continuation exists.
+        base["google_client"] = false
         base["youtube_brands"] = [b.name for b in app.settings.brands if "youtube" in b.platforms]
         base["meta_brands"] = [b.name for b in app.settings.brands if "facebook" in b.platforms || "instagram" in b.platforms]
         base["youtube_privacy"] = app.settings.youtube_privacy
@@ -151,10 +154,10 @@ end
 # ── what the page sends ─────────────────────────────────────────────────────
 
 const PANE_ACTIONS = ("new", "rescan", "start", "open", "overview", "add_account", "remove_account",
-                      "title", "brands", "brief", "link", "state", "approve", "approve_all", "unapprove", "changes",
+                      "title", "brands", "brief", "link", "state", "approve", "approve_all", "publish_all", "unapprove", "changes",
                       "edit", "remove", "publish", "mark", "retry", "answer", "ask_answer", "ask_answers",
                       "send", "ignore", "inbox_answer", "inbox_send", "inbox_done", "inbox_ignore", "inbox_reopen",
-                      "inbox_ask", "inbox_ask_all", "inbox_project", "google_client", "connect_youtube", "add_meta")
+                      "inbox_ask", "inbox_ask_all", "inbox_project", "set_pin", "check_updates", "google_client", "connect_youtube", "add_meta")
 
 # A click on the dashboard. What can't be done (an account whose password is
 # wrong, a draft another tab just removed) is said in this tab, not more.
@@ -195,14 +198,16 @@ function pane_action!(d::Dashboard, ::Val{:start}, id::AbstractString, ::Nothing
     return nothing
 end
 
+pane_action!(d::Dashboard, ::Val{:set_pin}, ::Nothing, pin::AbstractString) = create_vault!(d.app, pin)
+pane_action!(d::Dashboard, ::Val{:check_updates}, ::Nothing, pin::AbstractString) = poll_with_pin!(d.app, pin)
 pane_action!(d::Dashboard, ::Val{:add_account}, ::Nothing, v::AbstractDict) =
-    add_account!(d.app, v["platform"], v["brand"], v["handle"], v["server"], v["role"], v["secret"])
-pane_action!(d::Dashboard, ::Val{:remove_account}, id::AbstractString, ::Nothing) = remove_account!(d.app, id)
+    add_account_with_pin!(d.app, v["platform"], v["brand"], v["handle"], v["server"], v["role"], v["secret"], v["pin"])
+pane_action!(d::Dashboard, ::Val{:remove_account}, id::AbstractString, pin::AbstractString) = remove_account_with_pin!(d.app, id, pin)
 pane_action!(d::Dashboard, ::Val{:google_client}, ::Nothing, v::AbstractDict) =
-    set_google_client!(d.app, v["client_id"], v["client_secret"])
+    set_google_client_with_pin!(d.app, v["client_id"], v["client_secret"], v["pin"])
 pane_action!(d::Dashboard, ::Val{:connect_youtube}, ::Nothing, brand::AbstractString) =
-    OpenPage(start_youtube_login!(d.app, brand))
-pane_action!(d::Dashboard, ::Val{:add_meta}, ::Nothing, v::AbstractDict) = add_meta_accounts!(d.app, v["brand"], v["token"])
+    throw(AppError("YouTube connection is disabled while the credential vault is locked between requests"))
+pane_action!(d::Dashboard, ::Val{:add_meta}, ::Nothing, v::AbstractDict) = add_meta_accounts_with_pin!(d.app, v["brand"], v["token"], v["pin"])
 
 pane_action!(d::Dashboard, ::Val{:brands}, id::AbstractString, brands::AbstractVector) =
     set_project!(d.app, id; brands = isempty(brands) ? String[] : checked_brands(d.app, brands))
@@ -220,7 +225,9 @@ pane_action!(d::Dashboard, ::Val{:unapprove}, id::Integer, ::Nothing) = review_d
 pane_action!(d::Dashboard, ::Val{:retry}, id::Integer, ::Nothing) = review_draft!(d.app, Int(id), "approved")
 pane_action!(d::Dashboard, ::Val{:edit}, id::Integer, text::AbstractString) = edit_draft_text!(d.app, Int(id), text)
 pane_action!(d::Dashboard, ::Val{:remove}, id::Integer, ::Nothing) = remove_draft!(d.app, Int(id))
-pane_action!(d::Dashboard, ::Val{:publish}, id::Integer, ::Nothing) = publish_in_background!(d.app, Int(id))
+pane_action!(d::Dashboard, ::Val{:publish}, id::Integer, pin::AbstractString) = publish_with_pin!(d.app, Int(id), pin)
+pane_action!(d::Dashboard, ::Val{:publish_all}, id::AbstractString, pin::AbstractString) =
+    publish_approved_with_pin!(d.app, id, pin)
 pane_action!(d::Dashboard, ::Val{:mark}, id::Integer, url::AbstractString) = mark_published!(d.app, Int(id), url)
 
 function pane_action!(d::Dashboard, ::Val{:approve_all}, id::AbstractString, ::Nothing)
@@ -238,7 +245,10 @@ function pane_action!(d::Dashboard, ::Val{:changes}, id::Integer, note::Abstract
 end
 
 pane_action!(d::Dashboard, ::Val{:answer}, ref::AbstractString, text::AbstractString) = draft_answer!(d.app, ref, text)
-pane_action!(d::Dashboard, ::Val{:send}, ref::AbstractString, ::Nothing) = send_in_background!(d.app, ref)
+pane_action!(d::Dashboard, ::Val{:send}, ref::AbstractString, v::AbstractDict) = begin
+    draft_answer!(d.app, ref, v["text"])
+    send_answer_with_pin!(d.app, ref, v["pin"])
+end
 pane_action!(d::Dashboard, ::Val{:ignore}, ref::AbstractString, ::Nothing) = set_reply!(d.app, ref; status = "ignored")
 
 function pane_action!(d::Dashboard, ::Val{:ask_answer}, ref::AbstractString, ::Nothing)
@@ -255,7 +265,10 @@ end
 
 pane_action!(d::Dashboard, ::Val{:inbox_answer}, ref::AbstractString, text::AbstractString) = draft_item_answer!(d.app, ref, text)
 pane_action!(d::Dashboard, ::Val{:inbox_project}, ref::AbstractString, ::Nothing) = project_from_release!(d.app, ref)
-pane_action!(d::Dashboard, ::Val{:inbox_send}, ref::AbstractString, ::Nothing) = send_item_in_background!(d.app, ref)
+pane_action!(d::Dashboard, ::Val{:inbox_send}, ref::AbstractString, v::AbstractDict) = begin
+    draft_item_answer!(d.app, ref, v["text"])
+    send_item_with_pin!(d.app, ref, v["pin"])
+end
 pane_action!(d::Dashboard, ::Val{:inbox_done}, ref::AbstractString, ::Nothing) = set_item!(d.app, ref; status = "done")
 pane_action!(d::Dashboard, ::Val{:inbox_ignore}, ref::AbstractString, ::Nothing) = set_item!(d.app, ref; status = "ignored")
 pane_action!(d::Dashboard, ::Val{:inbox_reopen}, ref::AbstractString, ::Nothing) =
@@ -446,9 +459,26 @@ const CommunityStyles = Styles(
     CSS(".cm-account-handle", "font-weight" => "500", "flex" => "1 1 auto", "min-width" => "0", "overflow" => "hidden",
         "text-overflow" => "ellipsis"),
     CSS(".cm-hint", "font-size" => "12px", "color" => "var(--bt-text-muted)", "line-height" => "1.45"),
+    CSS(".cm-platform-grid", "display" => "grid", "grid-template-columns" => "repeat(auto-fit, minmax(330px, 1fr))", "gap" => "14px", "margin-top" => "14px"),
+    CSS(".cm-platform-card", "display" => "flex", "flex-direction" => "column", "gap" => "12px", "padding" => "16px"),
+    CSS(".cm-platform-head", "display" => "flex", "align-items" => "center", "gap" => "10px"),
+    CSS(".cm-platform-head .cm-h2", "margin" => "0"),
+    CSS(".cm-credential-steps", "margin" => "0", "padding-left" => "20px", "display" => "grid", "gap" => "5px", "font-size" => "13px", "line-height" => "1.45", "color" => "var(--bt-text-muted)"),
+    CSS(".cm-configured", "display" => "flex", "flex-direction" => "column", "gap" => "5px"),
+    CSS(".cm-platform-card .cm-account", "padding" => "6px 8px"),
+    CSS(".cm-amplify", "border-top" => "1px solid var(--bt-border)", "padding-top" => "10px", "display" => "grid", "gap" => "10px"),
+    CSS(".cm-amplify summary", "cursor" => "pointer", "font-size" => "13px", "font-weight" => "600", "color" => "var(--bt-text-muted)"),
+    CSS(".cm-platform-manual", "background" => "color-mix(in srgb, var(--bt-surface) 80%, var(--bt-surface-2))"),
+    CSS(".cm-manual-copy", "font-size" => "13px", "line-height" => "1.5", "color" => "var(--bt-text-muted)"),
+    CSS(".cm-vault-callout", "margin-top" => "10px", "padding" => "10px 12px", "border-radius" => "8px", "background" => "color-mix(in srgb, var(--bt-accent) 12%, transparent)", "font-size" => "13px"),
     CSS(".cm-setup", "display" => "grid", "grid-template-columns" => "repeat(auto-fit, minmax(210px, 1fr))", "gap" => "8px",
         "padding" => "12px", "border-radius" => "10px", "background" => "var(--bt-bg)", "border" => "1px solid var(--bt-border)"),
     CSS(".cm-setup .cm-h2", "grid-column" => "1 / -1", "margin-bottom" => "2px"),
     CSS(".cm-setup-step", "display" => "grid", "gap" => "2px", "font-size" => "12px", "line-height" => "1.4"),
     CSS(".cm-setup-step span", "color" => "var(--bt-text-muted)"),
+    CSS(".cm-pin-dialog", "border" => "1px solid var(--bt-border-strong)", "border-radius" => "12px",
+        "padding" => "0", "background" => "var(--bt-surface)", "color" => "var(--bt-text)", "box-shadow" => "0 20px 60px rgba(0,0,0,.35)"),
+    CSS(".cm-pin-dialog::backdrop", "background" => "rgba(0,0,0,.55)"),
+    CSS(".cm-pin-form", "width" => "min(360px, calc(100vw - 40px))", "display" => "flex", "flex-direction" => "column",
+        "gap" => "12px", "padding" => "22px"),
 )

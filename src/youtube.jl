@@ -24,6 +24,13 @@ function set_google_client!(app::CommunityApp, id::AbstractString, secret_::Abst
     return nothing
 end
 
+function set_google_client_with_pin!(app::CommunityApp, id::AbstractString, secret_::AbstractString, pin::AbstractString)
+    vault_exists(app) || throw(AppError("set a Community PIN before adding the Google client"))
+    return with_vault!(app, pin) do
+        set_google_client!(app, id, secret_)
+    end
+end
+
 form(pairs...) = Vector{UInt8}(HTTP.escapeuri(Dict(pairs)))
 
 "A fresh access token for `a`'s channel, from its refresh token; kept for 50 minutes (they live an hour)."

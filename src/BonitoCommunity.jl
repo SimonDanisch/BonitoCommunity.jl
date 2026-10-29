@@ -24,18 +24,20 @@ using BonitoAgents: AgentApp, AppContext, AppTool, Param, ToolScope, AppChat, Ap
     send_message!, atomic_write_json, load_json_tolerant, relative_time_label
 using Bonito
 using Dates
-using Base64: base64encode
-import HTTP, JSON, SHA, Sockets
+using Base64: base64encode, base64decode
+import HTTP, JSON, SHA, Sockets, libsodium_jll
 
 export CommunityApp
 
 function __init__()
+    sodium_init!()
     BonitoAgents.register_app!(CommunityApp)
 end
 
 include("model.jl")
 include("platforms.jl")
 include("http.jl")
+include("vault.jl")
 include("app.jl")
 include("bluesky.jl")
 include("mastodon.jl")

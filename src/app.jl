@@ -16,11 +16,30 @@ JSON.@defaults struct Settings
     youtube_privacy::String = "private"
 end
 
+# Discourse became a first-class, manually published release destination after
+# the first settings files existed.  Carry the two built-in library brands
+# forward without changing any custom brand or its other choices.
+function upgrade_settings(settings::Settings)
+    changed = false
+    brands = Brand[]
+    for b in settings.brands
+        if b.name in ("Makie", "Bonito") && !("discourse" in b.platforms)
+            push!(brands, Brand(b.name, [b.platforms; "discourse"], b.notes))
+            changed = true
+        else
+            push!(brands, b)
+        end
+    end
+    return changed ? Settings(settings.projects_dir, brands, settings.watches, settings.youtube_privacy) : settings
+end
+
 mutable struct CommunityApp <: AgentApp
     const lock::ReentrantLock
     const ctx::AppContext
     const file::String
     const secrets_file::String
+    # Non-nothing only during one PIN-authorised dashboard operation.
+    const active_secrets::Base.RefValue{Union{Nothing,Dict{String,String}}}
     const settings::Settings
     const state::Observable{CommunityFile}
     # Logged-in Bluesky accounts, by account id.
@@ -41,11 +60,17 @@ function CommunityApp(ctx::AppContext; poll::Bool = true)
     if settings === nothing
         settings = default_settings(ctx)
         atomic_write_json(settings_file, settings)
+    else
+        upgraded = upgrade_settings(settings)
+        if upgraded !== settings
+            settings = upgraded
+            atomic_write_json(settings_file, settings)
+        end
     end
     file = joinpath(ctx.dir, "community.json")
     saved = something(load_json_tolerant(file, "community.json", CommunityFile), CommunityFile())
     next = max(saved.next_draft, maximum((d.id for d in saved.drafts); init = 0) + 1)
-    app = CommunityApp(ReentrantLock(), ctx, file, joinpath(ctx.dir, "secrets.json"), settings,
+    app = CommunityApp(ReentrantLock(), ctx, file, joinpath(ctx.dir, "secrets.enc"), Ref{Union{Nothing,Dict{String,String}}}(nothing), settings,
                        Observable(with(saved; next_draft = next)), Dict{String,Session}(),
                        Dict{Int,DateTime}(), Dict{String,DateTime}(), Observable(""), nothing)
     scan_projects!(app)
@@ -237,18 +262,16 @@ end
 
 # ── accounts and their secrets ──────────────────────────────────────────────
 
-# secrets.json: account id => app password / access token. Only this file holds
-# them, readable by the server's user alone.
-load_secrets(app::CommunityApp) =
-    something(load_json_tolerant(app.secrets_file, "community secrets.json", Dict{String,String}), Dict{String,String}())
+"The request-scoped decrypted credentials. This is inaccessible while locked."
+function load_secrets(app::CommunityApp)
+    secrets = app.active_secrets[]
+    secrets === nothing && throw(AppError("Community is locked: enter the PIN for this account action"))
+    return secrets
+end
 
-function store_secret!(app::CommunityApp, id::AbstractString, secret::Union{AbstractString,Nothing})
-    lock(app.lock) do
-        secrets = load_secrets(app)
-        secret === nothing ? delete!(secrets, id) : (secrets[id] = secret)
-        atomic_write_json(app.secrets_file, secrets)
-        chmod(app.secrets_file, 0o600)
-    end
+function store_secret!(app::CommunityApp, id::AbstractString, value::Union{AbstractString,Nothing})
+    secrets = load_secrets(app)
+    value === nothing ? delete!(secrets, id) : (secrets[id] = value)
 end
 
 function secret(app::CommunityApp, a::Account)
@@ -285,10 +308,24 @@ function add_account!(app::CommunityApp, platform::AbstractString, brand::Abstra
     return a
 end
 
+"Check and save an account during one explicit PIN-authorised UI action."
+function add_account_with_pin!(app::CommunityApp, platform, brand, handle, server, role, value, pin)
+    vault_exists(app) || throw(AppError("set a Community PIN before adding accounts"))
+    return with_vault!(app, pin) do
+        add_account!(app, platform, brand, handle, server, role, value)
+    end
+end
+
 function remove_account!(app::CommunityApp, id::AbstractString)
     find_account(app, id)
     store_secret!(app, id, nothing)
     return update!(s -> with(s; accounts = filter(a -> a.id != id, s.accounts)), app)
+end
+
+function remove_account_with_pin!(app::CommunityApp, id::AbstractString, pin::AbstractString)
+    return with_vault!(app, pin) do
+        remove_account!(app, id)
+    end
 end
 
 "The account that publishes `brand`'s drafts on `platform`."
