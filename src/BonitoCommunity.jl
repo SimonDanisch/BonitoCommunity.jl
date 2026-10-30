@@ -47,6 +47,7 @@ include("meta.jl")
 include("publish.jl")
 include("replies.jl")
 include("inbox.jl")
+include("project_files.jl")
 include("tools.jl")
 include("pane.jl")
 

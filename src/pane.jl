@@ -107,9 +107,12 @@ function reply_data(r::Reply)
 end
 
 # A file of the project as the page shows it: a URL the browser streams it from.
-file_data(d::Dashboard, p::Project, f::AbstractString) =
-    Dict{String,Any}("name" => f, "video" => is_video(f), "image" => is_image(f),
-                     "url" => chat_file_url(d.view, joinpath(project_folder(projects_dir(d.app), p), f)))
+function file_data(d::Dashboard, p::Project, f::AbstractString)
+    chat = get(d.app.ctx.server.projects[], p.chat, nothing)
+    folder = chat === nothing ? project_folder(projects_dir(d.app), p) : chat.worker_path
+    return Dict{String,Any}("name" => f, "video" => is_video(f), "image" => is_image(f),
+                          "url" => chat_file_url(d.view, joinpath(folder, f)))
+end
 
 function counts(drafts::Vector{Draft})
     Dict{String,Any}("review" => count(x -> x.status in ("draft", "changes"), drafts),

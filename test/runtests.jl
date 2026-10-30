@@ -63,6 +63,12 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test Set(p["id"] for p in data["platforms"]) == Set(CM.platform_id.(CM.PLATFORMS))
         @test only(filter(p -> p["id"] == "discourse", data["platforms"]))["color"] == "#9558b2"
     end
+    @testset "worker project paths are independent of server state" begin
+        p = CM.Project("release", "Release", ["Bonito"], "", "new", now(UTC), "")
+        @test CM.project_worker_folder((projects_root="/home/worker/projects", name="Worker"), p) == "/home/worker/projects/BonitoCommunity/release"
+        @test CM.project_worker_folder((projects_root="C:\\Projects", name="Worker"), p) == "C:/Projects/BonitoCommunity/release"
+        @test_throws BT.AppError CM.project_worker_folder((projects_root="", name="Worker"), p)
+    end
 
     @testset "editable brands persist without changing other settings" begin
         old = app.settings

@@ -19,6 +19,7 @@ const TK = TestKit
 const SHOTS = joinpath(@__DIR__, "shots")
 mkpath(SHOTS)
 const P = "2026-10-black-hole-render"
+const EMPTY_PROJECT = CM.project_slug("Empty announcement")
 const VIDEO = "/home/sim/Programmieren/Science4Makie/black-hole-complete-20261025.mp4"
 
 const DRAFTS = [
@@ -45,12 +46,20 @@ project_draft(i, d) = TK.mcp_call("project_draft"; real_process = true, id = "d$
                                   kind = d.kind, title = d.title, text = d.text, media = d.media)
 
 agent(prompt) =
+    occursin("Start drafting project $EMPTY_PROJECT", prompt) ?
+        [TK.mcp_call("cm_start_project_chat"; real_process=true, id="empty-start", project=EMPTY_PROJECT,
+                     prompt="EMPTY-ANNOUNCEMENT"), TK.text("Empty project chat started"), TK.end_turn()] :
+    occursin("EMPTY-ANNOUNCEMENT", prompt) ?
+        [TK.text("Empty announcement workspace ready"), TK.end_turn()] :
     occursin("Start drafting project", prompt) ?
         [TK.mcp_call("cm_start_project_chat"; real_process = true, id = "start", project = P,
                      prompt = "DRAFT-THE-POSTS: the black hole render in this folder, for Makie4Science (Makie reposts)."),
          TK.text("Started the project's chat; it is drafting the posts."), TK.end_turn()] :
     occursin("DRAFT-THE-POSTS", prompt) ?
-        [[project_draft(i, d) for (i, d) in enumerate(DRAFTS)]...,
+        [TK.mcp_call("bt_process"; real_process=true, id="worker-file", arguments=Dict("action"=>"start", "id"=>"write-worker-file",
+                     "argv"=>["python3", "-c", "from pathlib import Path; Path('worker-only.txt').write_text('Generated on worker'); Path('keep-on-server.txt').unlink()"])),
+         TK.mcp_call("bt_process"; real_process=true, id="worker-file-wait", arguments=Dict("action"=>"wait", "id"=>"write-worker-file", "seconds"=>30)),
+         [project_draft(i, d) for (i, d) in enumerate(DRAFTS)]...,
          TK.mcp_call("project_submit"; real_process = true, id = "submit",
                      message = "Seven drafts: the YouTube upload, TikTok, a Reel, Facebook, Bluesky and Mastodon link posts, LinkedIn."),
          TK.text("Seven drafts are ready for review in the pane: YouTube, TikTok, Instagram, Facebook, " *
@@ -64,6 +73,7 @@ dir = mktempdir()
 projects = joinpath(dir, "projects")
 mkpath(joinpath(projects, P))
 symlink(VIDEO, joinpath(projects, P, "black-hole.mp4"))
+write(joinpath(projects, P, "keep-on-server.txt"), "Original server material")
 write(joinpath(projects, P, "notes.md"), "Render notes: 4k, 120 s, one GPU.\n")
 mkpath(joinpath(projects, "2026-11-makie-0-25-release"))
 mkpath(joinpath(dir, "state", "apps", "community"))
@@ -208,6 +218,8 @@ try
 
     # the project's own pane
     TK.open_chat(s, CM.find_project(app, P).chat)
+    @test TK.wait_for(s, "worker output returns to project material", "[...document.querySelectorAll('.cm-files')].some(n => n.textContent.includes('worker-only.txt'))"; timeout=20)
+    @test js(s, "[...document.querySelectorAll('.cm-files')].some(n => n.textContent.includes('keep-on-server.txt'))")
     TK.wait_for(s, "the project pane", "!!document.querySelector('.cm-drafts .cm-draft')"; timeout = 30)
     shot(s, "4-project")
     @test js(s, "document.querySelectorAll('[data-save^=\"link:\"]').length") == 2
@@ -256,6 +268,18 @@ try
     js(s, "document.querySelector('.cm-replies').scrollIntoView(); true")
     shot(s, "7-replies")
     @test occursin("48 likes", js(s, "document.querySelector('[data-draft=\"$(md.id)\"]').innerText"))
+    # Also cover the original release failure: a new project with NO files.
+    TK.open_chat(s, overview.id)
+    js(s, "document.querySelector('[data-act=toggle-new]').click(); true")
+    TK.wait_for(s, "new empty project form", "!!document.querySelector('[data-box=new] [name=title]')"; timeout=10)
+    TK.set_input(s, "[data-box=new] [name=title]", "Empty announcement")
+    js(s, "document.querySelector('[data-box=new] [data-act=brand][data-value=Bonito]').click(); document.querySelector('[data-act=create]').click(); true")
+    empty_card = "[...document.querySelectorAll('.cm-project')].find(c=>c.textContent.includes('Empty announcement'))"
+    TK.wait_for(s, "empty project created", "!!$empty_card"; timeout=10)
+    js(s, "$empty_card.querySelector('[data-act=start]').click(); true")
+    @test TK.wait_for(s, "empty project starts on worker", "!!$empty_card?.dataset.chat"; timeout=60)
+    TK.open_chat(s, CM.find_project(app, EMPTY_PROJECT).chat)
+    @test TK.wait_for(s, "empty workspace agent runs", "[...document.querySelectorAll('.bt-messages')].some(n=>n.textContent.includes('Empty announcement workspace ready'))"; timeout=60)
     @test isempty(TK.js_errors(s))
 finally
     close(s)

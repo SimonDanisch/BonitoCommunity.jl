@@ -167,7 +167,8 @@ function BonitoAgents.call_tool(app::CommunityApp, ::Val{:cm_start_project_chat}
     owner = caller_user(call)
     worker = find_worker(call.server, owner, call.caller.worker_id)
     worker === nothing && throw(AppError("this chat's worker is gone"))
-    chat = start_chat!(call.server, owner, worker, project_folder(projects_dir(app), p);
+    folder = prepare_project_worker!(app, worker, p)
+    chat = start_chat!(call.server, owner, worker, folder;
                        title = p.title, prompt, app, key = project_key(p))
     set_project!(app, p.id; chat = chat.id, state = p.state == "new" ? "drafting" : p.state)
     return "Started chat \"$(chat.title[])\" ($(chat.id)) for project $(p.id)."
@@ -222,7 +223,7 @@ function BonitoAgents.call_tool(app::CommunityApp, ::Val{:project_info}, call::A
     # $(p.title) ($(p.id)) · $(p.state)
     Brief: $(isempty(p.brief) ? "(none)" : p.brief)
     Links: $links
-    Folder: $(project_folder(projects_dir(app), p))
+    Folder on your worker: $(call.caller.worker_path)
     Material: $(isempty(files) ? "none yet" : join(files, ", "))
 
     $(join(brands, "\n\n"))
@@ -236,6 +237,7 @@ split_list(s::AbstractString) = String[strip(x) for x in split(s, ',') if !isemp
 function BonitoAgents.call_tool(app::CommunityApp, ::Val{:project_draft}, call::AppCall)
     p = caller_project(app, call)
     (; brand, platform, kind, text, title, media, draft_id) = call.args
+    isempty(strip(media)) || collect_project_files!(app, p, call.caller)
     d = save_draft!(app, p.id; draft_id, brand, platform, kind, title, text, media = split_list(media))
     return "Saved draft #$(d.id) ($(d.brand) · $(d.platform) · $(d.kind))."
 end
@@ -243,6 +245,7 @@ end
 function BonitoAgents.call_tool(app::CommunityApp, ::Val{:project_submit}, call::AppCall)
     p = caller_project(app, call)
     isempty(project_drafts(app.state[], p.id)) && throw(AppError("there are no drafts yet"))
+    collect_project_files!(app, p, call.caller)
     p.state in ("new", "drafting") && set_project!(app, p.id; state = "review")
     return "Project $(p.id) is ready for review. ($(call.args.message))"
 end

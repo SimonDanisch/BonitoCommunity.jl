@@ -50,6 +50,13 @@ forums and repositories, YouTube privacy) are in `settings.json` next to it.
 
 ## Install as a server plugin
 
+Projects persist on the server in `apps/community/projects` under its state
+directory (or `settings.json`'s `projects_dir`). Before starting a project chat,
+Community transfers its material to `<worker.projects_root>/BonitoCommunity/<id>`.
+The agent works in that worker folder; media drafts and submission collect its
+files back to the server for review and publishing, preserving server-only files.
+Server and worker do not need matching filesystem paths or Remote Julia.
+
 The shared UI requires current BonitoAgents `main` (including merged
 [PR #28](https://github.com/SimonDanisch/BonitoAgents.jl/pull/28)). Community
 uses its public `AppButton`, `AppCard`, `AppModal` and `AppUIStyles`; all share

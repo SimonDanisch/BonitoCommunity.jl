@@ -2,8 +2,8 @@
 
 # Projects belong to the app's persistent state, never to the package source
 # tree. A package installed by Pkg lives in a shared, often read-only depot.
-# The server reads them directly, so for now the server and the worker the
-# project chats run on are the same machine.
+# The server keeps the durable material; project_files.jl transports it to and
+# from an independent workspace on the selected worker.
 default_projects_dir(ctx::AppContext) = joinpath(ctx.dir, "projects")
 default_settings(ctx::AppContext) = Settings(default_projects_dir(ctx), DEFAULT_BRANDS, DEFAULT_WATCHES, "private")
 
