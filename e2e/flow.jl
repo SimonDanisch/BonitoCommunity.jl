@@ -73,7 +73,6 @@ js(s, code) = TK.eval_js(s, code)
 s = TK.dev_server(; agent, dir, apps = (BT.BUILTIN_APPS..., CommunityApp), browser_width = 1600, browser_height = 1000)
 try
     app = s.h.state.apps["community"]
-    CM.create_vault!(app, "e2e-only PIN")
     for _ in 1:240
         any(isopen, values(s.h.state.workers[])) && break
         sleep(0.5)
@@ -100,6 +99,19 @@ try
     TK.open_chat(s, overview.id)
     TK.wait_for(s, "the overview", "!!document.querySelector('.cm-grid .cm-project')"; timeout = 30)
     shot(s, "1-overview-new")
+
+    # Exercise first-use PIN setup through the real dashboard, including the
+    # modal's visible inputs and its submit action.
+    js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
+    js(s, "document.querySelector('[data-act=set-pin]').click(); true")
+    TK.wait_for(s, "the PIN dialog inputs", "document.querySelectorAll('.cm-pin-dialog[open] input').length === 2"; timeout = 10)
+    @test js(s, "document.querySelector('.cm-pin-dialog input').getBoundingClientRect().height > 0")
+    shot(s, "1b-set-pin")
+    js(s, "(() => { const p = document.querySelector('.cm-pin-dialog'); p.querySelectorAll('input').forEach(i => i.value = 'e2e-only PIN'); p.querySelector('button').click(); return true; })()")
+    TK.wait_for(s, "the account cards after setting PIN", "!!document.querySelector('.cm-platform-grid')"; timeout = 10)
+    @test CM.vault_exists(app)
+    @test js(s, "getComputedStyle(document.querySelector('[data-act=create], [data-act=toggle-new]')).borderRadius !== '0px'")
+    js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
 
     # pick the brands on the black hole card, then start drafting
     card = "[...document.querySelectorAll('.cm-project')].find(c => c.innerText.includes('Black hole'))"

@@ -24,9 +24,9 @@ function connect(root, data, act, feedback, navigate) {
                 placeholder: 'Repeat PIN'
             }) : null;
             const error = el('div', 'cm-hint');
-            const cancel = btn('Cancel', 'bt-btn-ghost', '');
+            const cancel = btn('Cancel', 'cm-btn-ghost', '');
             cancel.value = 'cancel';
-            const submit = btn(confirm ? 'Set PIN' : 'Continue', 'bt-btn-primary', '');
+            const submit = btn(confirm ? 'Set PIN' : 'Continue', 'cm-btn-primary', '');
             submit.value = 'ok';
             form.append(el('div', 'cm-h2', {}, title), el('div', 'cm-hint', {}, confirm ? 'This PIN encrypts platform credentials. It is never stored; losing it means reconnecting accounts.' : 'Credentials will be decrypted only for this one action.'), first, second, error, div('cm-row', submit, cancel));
             cancel.addEventListener('click', ()=>dialog.close('cancel'));
@@ -46,6 +46,7 @@ function connect(root, data, act, feedback, navigate) {
                 dialog.remove();
                 resolve(pin);
             });
+            dialog.append(form);
             document.body.append(dialog);
             dialog.showModal();
             first.focus();
@@ -354,7 +355,7 @@ const div = (cls, ...kids)=>{
     return d;
 };
 function btn(label, kind, act, attrs = {}) {
-    const b = el('button', `bt-btn bt-btn-sm ${kind}`, {
+    const b = el('button', `cm-btn cm-btn-sm ${kind}`, {
         type: 'button',
         'data-act': act,
         ...attrs
@@ -559,9 +560,9 @@ function overviewRegions(d, ui) {
                     `${p.length} project${p.length === 1 ? '' : 's'}`,
                     review ? `${review} draft${review === 1 ? '' : 's'} to review` : '',
                     replies ? `${replies} new repl${replies === 1 ? 'y' : 'ies'}` : ''
-                ].filter(Boolean).join(' · '))), el('div', 'cm-spacer'), btn(`Accounts${d.accounts.length ? ` (${d.accounts.length})` : ''}`, ui.showAccounts ? 'bt-btn-secondary cm-filter-on' : 'bt-btn-secondary', 'toggle-accounts'), btn('Rescan', 'bt-btn-ghost', 'rescan', {
+                ].filter(Boolean).join(' · '))), el('div', 'cm-spacer'), btn(`Accounts${d.accounts.length ? ` (${d.accounts.length})` : ''}`, ui.showAccounts ? 'cm-btn-secondary cm-filter-on' : 'cm-btn-secondary', 'toggle-accounts'), btn('Rescan', 'cm-btn-ghost', 'rescan', {
                     title: 'Pick up folders added to the projects folder'
-                }), btn('New project', 'bt-btn-primary', 'toggle-new'));
+                }), btn('New project', 'cm-btn-primary', 'toggle-new'));
                 return [
                     top
                 ];
@@ -588,7 +589,8 @@ function overviewRegions(d, ui) {
             'accounts',
             sig([
                 ui.showAccounts,
-                d.accounts
+                d.accounts,
+                d.vault_set
             ]),
             ()=>ui.showAccounts ? [
                     accounts(d)
@@ -629,7 +631,7 @@ function newProject(d) {
     }), brandToggles(d.brands, []), el('textarea', 'cm-textarea', {
         name: 'brief',
         placeholder: 'Brief: what it is about, what the posts should say'
-    }), el('div', 'cm-hint', {}, `Creates a folder in ${d.folder}; put the video and other material there.`), div('cm-row', btn('Create project', 'bt-btn-primary', 'create'), btn('Cancel', 'bt-btn-ghost', 'toggle-new')));
+    }), el('div', 'cm-hint', {}, `Creates a folder in ${d.folder}; put the video and other material there.`), div('cm-row', btn('Create project', 'cm-btn-primary', 'create'), btn('Cancel', 'cm-btn-ghost', 'toggle-new')));
     return box;
 }
 const field = (label, input)=>{
@@ -655,7 +657,7 @@ function configuredAccounts(d, platform) {
     const list = d.accounts.filter((a)=>a.platform === platform);
     return list.length ? div('cm-configured', ...list.map((a)=>div('cm-account', el('span', 'cm-account-handle', {
             title: a.server
-        }, '@' + a.handle), a.brand ? brandPill(a.brand) : el('span', 'cm-pill', {}, 'personal reposts'), btn('Remove', 'bt-btn-ghost', 'remove_account', {
+        }, '@' + a.handle), a.brand ? brandPill(a.brand) : el('span', 'cm-pill', {}, 'personal reposts'), btn('Remove', 'cm-btn-ghost', 'remove_account', {
             'data-id': a.id
         })))) : el('div', 'cm-hint', {}, 'Not connected yet.');
 }
@@ -680,7 +682,7 @@ function networkCard(d, platform, title, instructions, handleLabel, handlePlaceh
         autocomplete: 'new-password'
     })));
     form.setAttribute('data-account-form', 'post');
-    card.append(div('cm-platform-head', platformBadge(d.platforms, platform), div('', el('div', 'cm-h2', {}, title), el('div', 'cm-sub', {}, 'Automatic publishing'))), configuredAccounts(d, platform), credentialSteps(...instructions), form, div('cm-row', btn(`Check and connect ${title}`, 'bt-btn-primary', 'add-account', {
+    card.append(div('cm-platform-head', platformBadge(d.platforms, platform), div('', el('div', 'cm-h2', {}, title), el('div', 'cm-sub', {}, 'Automatic publishing'))), configuredAccounts(d, platform), credentialSteps(...instructions), form, div('cm-row', btn(`Check and connect ${title}`, 'cm-btn-primary', 'add-account', {
         'data-platform': platform,
         'data-role': 'post'
     })));
@@ -696,7 +698,7 @@ function networkCard(d, platform, title, instructions, handleLabel, handlePlaceh
         autocomplete: 'new-password'
     })));
     personal.setAttribute('data-account-form', 'amplify');
-    amplify.append(el('summary', '', {}, 'Optional: add a personal account that reposts releases'), el('div', 'cm-hint', {}, 'This account does not create brand posts. It only reposts the approved post after it goes out.'), personal, div('cm-row', btn('Check and add repost account', 'bt-btn-secondary', 'add-account', {
+    amplify.append(el('summary', '', {}, 'Optional: add a personal account that reposts releases'), el('div', 'cm-hint', {}, 'This account does not create brand posts. It only reposts the approved post after it goes out.'), personal, div('cm-row', btn('Check and add repost account', 'cm-btn-secondary', 'add-account', {
         'data-platform': platform,
         'data-role': 'amplify'
     })));
@@ -716,7 +718,7 @@ function metaCard(d) {
         name: 'page_token',
         type: 'password',
         autocomplete: 'new-password'
-    }))), div('cm-row', btn('Check and connect Page', 'bt-btn-primary', 'add-meta')));
+    }))), div('cm-row', btn('Check and connect Page', 'cm-btn-primary', 'add-meta')));
     return card;
 }
 function youtubeCard(d) {
@@ -730,7 +732,7 @@ function accounts(d) {
     });
     box.append(el('div', 'cm-h2', {}, 'Publishing accounts'), el('div', 'cm-hint', {}, 'Only Bluesky and Mastodon need setup for the first BonitoAgents announcement. Each credential is encrypted and requested again only for the action that uses it.'));
     if (!d.vault_set) {
-        box.append(el('div', 'cm-vault-callout', {}, 'First set a Community PIN. It encrypts credentials but is never stored.'), div('cm-row', btn('Set Community PIN', 'bt-btn-primary', 'set-pin')));
+        box.append(el('div', 'cm-vault-callout', {}, 'First set a Community PIN. It encrypts credentials but is never stored.'), div('cm-row', btn('Set Community PIN', 'cm-btn-primary', 'set-pin')));
         return box;
     }
     const grid = el('div', 'cm-platform-grid');
@@ -743,18 +745,18 @@ function accounts(d) {
         'Grant read and write scopes, then copy its access token.',
         'Enter the full handle including its instance; no separate server field is needed.'
     ], 'Full Mastodon handle', 'makie@fosstodon.org', 'Access token'), manualCard(d, 'linkedin', 'LinkedIn', 'Approve the draft, use Copy text, publish it in LinkedIn, then paste the resulting post URL back into Community.'), manualCard(d, 'discourse', 'Discourse', 'No credential is needed. Each release gets its own reviewable forum-topic draft: copy it into Discourse, publish it, then paste the topic URL back here.'), youtubeCard(d), metaCard(d));
-    box.append(grid, div('cm-row', btn('Close', 'bt-btn-ghost', 'toggle-accounts')));
+    box.append(grid, div('cm-row', btn('Close', 'cm-btn-ghost', 'toggle-accounts')));
     return box;
 }
 function inboxSection(d, ui) {
     const open = d.inbox.filter((x)=>x.status === 'new' || x.status === 'drafted');
     const handled = d.inbox.length - open.length;
-    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Inbox'), el('span', 'cm-sub', {}, open.length ? `${open.length} open` : ''), el('span', 'cm-spacer'), btn('Check updates', 'bt-btn-ghost', 'check-updates', {
+    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Inbox'), el('span', 'cm-sub', {}, open.length ? `${open.length} open` : ''), el('span', 'cm-spacer'), btn('Check updates', 'cm-btn-ghost', 'check-updates', {
         title: 'Unlock credentials only while checking replies and mentions'
     }), handled ? el('button', 'cm-filter' + (ui.showHandled ? ' cm-filter-on' : ''), {
         type: 'button',
         'data-act': 'toggle-handled'
-    }, `Handled ${handled}`) : null, open.length ? btn('Draft answers', 'bt-btn-secondary', 'inbox_ask_all', {
+    }, `Handled ${handled}`) : null, open.length ? btn('Draft answers', 'cm-btn-secondary', 'inbox_ask_all', {
         title: "Ask the overview's agent to draft answers to the open items"
     }) : null);
     const shown = ui.showHandled ? d.inbox : open;
@@ -790,14 +792,14 @@ function inboxCard(d, x) {
     }, 'Open on ' + platformName(d.sources, x.source) + ' ↗'));
     if (done) {
         if (x.answer) main.append(div('cm-answer', el('div', 'cm-sub', {}, x.status === 'answered' ? 'Answered:' : 'Drafted:'), el('div', 'cm-reply-text', {}, x.answer)));
-        main.append(div('cm-row', btn('Reopen', 'bt-btn-ghost', 'inbox_reopen', {
+        main.append(div('cm-row', btn('Reopen', 'cm-btn-ghost', 'inbox_reopen', {
             'data-id': x.ref
         })));
     } else if (x.kind === 'release') {
-        main.append(div('cm-row', btn('Start a project', 'bt-btn-primary', 'inbox_project', {
+        main.append(div('cm-row', btn('Start a project', 'cm-btn-primary', 'inbox_project', {
             'data-id': x.ref,
             title: 'A project for its blog post and the announcements'
-        }), el('span', 'cm-spacer'), btn('Ignore', 'bt-btn-ghost', 'inbox_ignore', {
+        }), el('span', 'cm-spacer'), btn('Ignore', 'cm-btn-ghost', 'inbox_ignore', {
             'data-id': x.ref
         })));
     } else {
@@ -807,23 +809,23 @@ function inboxCard(d, x) {
         });
         answer.value = x.answer;
         answer.style.minHeight = '60px';
-        const send = x.kind === 'mention' ? btn('Send', 'bt-btn-primary', 'inbox-send', {
+        const send = x.kind === 'mention' ? btn('Send', 'cm-btn-primary', 'inbox-send', {
             'data-id': x.ref,
             title: 'Send this answer now'
-        }) : btn('Copy answer', 'bt-btn-primary', 'copy', {
+        }) : btn('Copy answer', 'cm-btn-primary', 'copy', {
             'data-value': x.answer,
             disabled: !x.answer,
             title: 'Copy it, then answer on the forum'
         });
-        main.append(answer, div('cm-row', send, btn('Save', 'bt-btn-secondary', 'inbox-save', {
+        main.append(answer, div('cm-row', send, btn('Save', 'cm-btn-secondary', 'inbox-save', {
             'data-id': x.ref
-        }), btn('Ask agent', 'bt-btn-ghost', 'inbox_ask', {
+        }), btn('Ask agent', 'cm-btn-ghost', 'inbox_ask', {
             'data-id': x.ref,
             title: "Ask the overview's agent to draft it"
-        }), el('span', 'cm-spacer'), btn('Done', 'bt-btn-ghost', 'inbox_done', {
+        }), el('span', 'cm-spacer'), btn('Done', 'cm-btn-ghost', 'inbox_done', {
             'data-id': x.ref,
             title: 'Nothing (more) to do'
-        }), btn('Ignore', 'bt-btn-ghost', 'inbox_ignore', {
+        }), btn('Ignore', 'cm-btn-ghost', 'inbox_ignore', {
             'data-id': x.ref
         })));
     }
@@ -869,7 +871,7 @@ function projectCard(d, p) {
         body.append(...[
             brandToggles(d.brands, p.brands, p.id),
             p.brief ? el('div', 'cm-sub', {}, p.brief) : null,
-            div('cm-row', el('span', 'cm-sub', {}, `${p.nfiles} file${p.nfiles === 1 ? '' : 's'}`), el('span', 'cm-spacer'), btn('Start drafting', 'bt-btn-primary', 'start', {
+            div('cm-row', el('span', 'cm-sub', {}, `${p.nfiles} file${p.nfiles === 1 ? '' : 's'}`), el('span', 'cm-spacer'), btn('Start drafting', 'cm-btn-primary', 'start', {
                 'data-id': p.id,
                 disabled: p.brands.length === 0,
                 title: p.brands.length ? "Ask the overview's agent to start this project's chat" : 'Pick its brands first'
@@ -950,7 +952,7 @@ function projectTop(d, p) {
         o.selected = s === p.state;
         state.append(o);
     }
-    return div('cm-section', div('cm-top', btn('← Overview', 'bt-btn-ghost', 'overview'), el('span', 'cm-spacer'), state), div('cm-top', el('h1', 'cm-h1', {
+    return div('cm-section', div('cm-top', btn('← Overview', 'cm-btn-ghost', 'overview'), el('span', 'cm-spacer'), state), div('cm-top', el('h1', 'cm-h1', {
         'data-edit-title': p.id,
         title: 'Double-click to rename'
     }, p.title), ...p.brands.map(brandPill)), steps(d.states, p.state, true));
@@ -1041,9 +1043,9 @@ function draftSection(d, p, ui) {
             'data-value': k
         }, `${label} ${n}`));
     }
-    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Drafts'), filters, el('span', 'cm-spacer'), toApprove ? btn(`Approve all (${toApprove})`, 'bt-btn-secondary', 'approve_all', {
+    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Drafts'), filters, el('span', 'cm-spacer'), toApprove ? btn(`Approve all (${toApprove})`, 'cm-btn-secondary', 'approve_all', {
         'data-id': p.id
-    }) : null, readyToPublish.length ? btn(`Publish approved automatic posts (${readyToPublish.length})`, 'bt-btn-primary', 'publish-all', {
+    }) : null, readyToPublish.length ? btn(`Publish approved automatic posts (${readyToPublish.length})`, 'cm-btn-primary', 'publish-all', {
         'data-id': p.id,
         title: 'Sends every approved post that has an automatic platform account. LinkedIn remains a deliberate manual copy-and-mark step.'
     }) : null);
@@ -1112,9 +1114,9 @@ function draftCard(d, p, x, ui) {
             name: 'note',
             type: 'text',
             placeholder: 'What should change? (Enter sends it to the project chat)'
-        }), btn('Send', 'bt-btn-primary', 'changes', {
+        }), btn('Send', 'cm-btn-primary', 'changes', {
             'data-id': x.id
-        }), btn('Cancel', 'bt-btn-ghost', 'cancel'));
+        }), btn('Cancel', 'cm-btn-ghost', 'cancel'));
         box.setAttribute('data-box', `changes-${x.id}`);
         box.style.width = '100%';
         foot.append(box);
@@ -1123,26 +1125,26 @@ function draftCard(d, p, x, ui) {
             name: 'url',
             type: 'url',
             placeholder: 'Link to the post'
-        }), btn('Mark published', 'bt-btn-primary', 'mark', {
+        }), btn('Mark published', 'cm-btn-primary', 'mark', {
             'data-id': x.id
-        }), btn('Cancel', 'bt-btn-ghost', 'cancel'));
+        }), btn('Cancel', 'cm-btn-ghost', 'cancel'));
         box.setAttribute('data-box', `mark-${x.id}`);
         box.style.width = '100%';
         foot.append(box);
     } else if (x.status === 'draft' || x.status === 'changes') {
-        foot.append(btn('Approve', 'bt-btn-primary', 'approve', {
+        foot.append(btn('Approve', 'cm-btn-primary', 'approve', {
             'data-num': x.id
-        }), btn('Request changes', 'bt-btn-secondary', 'changes-open', {
+        }), btn('Request changes', 'cm-btn-secondary', 'changes-open', {
             'data-id': x.id
-        }), btn('Edit', 'bt-btn-ghost', 'edit', {
+        }), btn('Edit', 'cm-btn-ghost', 'edit', {
             'data-id': x.id
-        }), el('span', 'cm-spacer'), btn('Remove', 'bt-btn-ghost', 'remove', {
+        }), el('span', 'cm-spacer'), btn('Remove', 'cm-btn-ghost', 'remove', {
             'data-num': x.id
         }));
     } else if (x.status === 'approved') {
         if (x.publishes) {
             const why = x.needs_links.length ? `Set the project's ${x.needs_links.join(' and ')} link first` : !x.has_account ? `No ${platformName(d.platforms, x.platform)} account posts for ${x.brand}: add one in the overview` : '';
-            foot.append(btn('Publish', 'bt-btn-primary', 'publish', {
+            foot.append(btn('Publish', 'cm-btn-primary', 'publish', {
                 'data-num': x.id,
                 disabled: !!why,
                 title: why || 'Publish now, then repost with the other accounts'
@@ -1151,31 +1153,31 @@ function draftCard(d, p, x, ui) {
         } else {
             const [post, comment] = x.final_text.split(/\n---\n/);
             const manualText = x.platform === 'discourse' && x.title ? `${x.title}\n\n${post}` : post;
-            foot.append(btn('Copy text', 'bt-btn-primary', 'copy', {
+            foot.append(btn('Copy text', 'cm-btn-primary', 'copy', {
                 'data-value': manualText.trim(),
                 title: `Copy, then post it on ${platformName(d.platforms, x.platform)}`
             }));
-            if (comment) foot.append(btn('Copy comment', 'bt-btn-secondary', 'copy', {
+            if (comment) foot.append(btn('Copy comment', 'cm-btn-secondary', 'copy', {
                 'data-value': comment.trim()
             }));
-            foot.append(btn('Mark published', 'bt-btn-secondary', 'mark-open', {
+            foot.append(btn('Mark published', 'cm-btn-secondary', 'mark-open', {
                 'data-id': x.id
             }));
         }
-        foot.append(el('span', 'cm-spacer'), btn('Back to draft', 'bt-btn-ghost', 'unapprove', {
+        foot.append(el('span', 'cm-spacer'), btn('Back to draft', 'cm-btn-ghost', 'unapprove', {
             'data-num': x.id
         }));
     } else if (x.status === 'publishing') {
         foot.append(el('span', 'cm-sub', {}, 'Publishing…'));
     } else if (x.status === 'failed') {
-        foot.append(btn('Retry', 'bt-btn-primary', 'retry', {
+        foot.append(btn('Retry', 'cm-btn-primary', 'retry', {
             'data-num': x.id
-        }), btn('Edit', 'bt-btn-ghost', 'edit', {
+        }), btn('Edit', 'cm-btn-ghost', 'edit', {
             'data-id': x.id
         }));
     } else if (x.status === 'published') {
         const original = x.posts.find((q)=>q.kind === 'original');
-        if (original) foot.append(el('a', 'bt-btn bt-btn-sm bt-btn-secondary', {
+        if (original) foot.append(el('a', 'cm-btn cm-btn-sm cm-btn-secondary', {
             href: original.url,
             target: '_blank',
             rel: 'noopener'
@@ -1186,7 +1188,7 @@ function draftCard(d, p, x, ui) {
 }
 function replySection(d, p) {
     const open = p.replies.filter((r)=>r.status === 'new' || r.status === 'drafted');
-    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Replies'), el('span', 'cm-sub', {}, p.replies.length ? `${open.length} open of ${p.replies.length}` : ''), el('span', 'cm-spacer'), open.length ? btn('Draft answers', 'bt-btn-secondary', 'ask_answers', {
+    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Replies'), el('span', 'cm-sub', {}, p.replies.length ? `${open.length} open of ${p.replies.length}` : ''), el('span', 'cm-spacer'), open.length ? btn('Draft answers', 'cm-btn-secondary', 'ask_answers', {
         title: "Ask this project's agent to draft answers to the open replies"
     }) : null);
     if (!p.replies.length) return div('cm-section', head, el('div', 'cm-empty', {}, 'Replies to the published Bluesky and Mastodon posts show up here.'));
@@ -1216,15 +1218,15 @@ function replyCard(d, r) {
         });
         answer.value = r.answer;
         answer.style.minHeight = '60px';
-        main.append(answer, div('cm-row', btn('Send', 'bt-btn-primary', 'send', {
+        main.append(answer, div('cm-row', btn('Send', 'cm-btn-primary', 'send', {
             'data-id': r.ref,
             title: 'Send this answer now'
-        }), btn('Save', 'bt-btn-secondary', 'save-answer', {
+        }), btn('Save', 'cm-btn-secondary', 'save-answer', {
             'data-id': r.ref
-        }), btn('Ask agent', 'bt-btn-ghost', 'ask_answer', {
+        }), btn('Ask agent', 'cm-btn-ghost', 'ask_answer', {
             'data-id': r.ref,
             title: "Ask this project's agent to draft it"
-        }), el('span', 'cm-spacer'), btn('Ignore', 'bt-btn-ghost', 'ignore', {
+        }), el('span', 'cm-spacer'), btn('Ignore', 'cm-btn-ghost', 'ignore', {
             'data-id': r.ref
         })));
     }
