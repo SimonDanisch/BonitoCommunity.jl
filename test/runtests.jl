@@ -58,6 +58,12 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
     server, app, projects = test_server()
     app.poller === nothing || close(app.poller)   # the test drives the checks itself
 
+    @testset "dashboard includes every platform" begin
+        data = CM.dashboard_data(CM.Dashboard(app, nothing, ""), app.state[], "")
+        @test Set(p["id"] for p in data["platforms"]) == Set(CM.platform_id.(CM.PLATFORMS))
+        @test only(filter(p -> p["id"] == "discourse", data["platforms"]))["color"] == "#9558b2"
+    end
+
     @testset "platforms" begin
         @test CM.find_platform("Bluesky") === CM.Bluesky()
         @test_throws BT.AppError CM.find_platform("myspace")

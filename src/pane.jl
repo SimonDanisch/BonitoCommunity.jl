@@ -44,7 +44,7 @@ end
 
 const PLATFORM_COLORS = Dict("youtube" => "#ff0033", "tiktok" => "#111111", "instagram" => "#e1306c",
                              "facebook" => "#1877f2", "bluesky" => "#1185fe", "mastodon" => "#6364ff",
-                             "linkedin" => "#0a66c2")
+                             "linkedin" => "#0a66c2", "discourse" => "#9558b2")
 
 function platform_data(pl::Platform)
     Dict{String,Any}("id" => platform_id(pl), "name" => platform_name(pl), "color" => PLATFORM_COLORS[platform_id(pl)],
