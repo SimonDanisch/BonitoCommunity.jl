@@ -33,7 +33,7 @@ end
 Dashboard(app, view, project) = Dashboard(app, view, project,
     Observable(Dict{String,Any}("filter" => "all", "showNew" => false, "showAccounts" => false,
                                "showHandled" => false, "marking" => nothing, "changing" => nothing,
-                               "youtube_state" => "", "youtube_url" => "")),
+                               "youtube_state" => "", "youtube_url" => "", "showBrands" => false)),
     Observable{Any}(nothing), Observable(""), Observable(""), Observable(false))
 
 function Base.close(d::Dashboard)
@@ -137,6 +137,7 @@ function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
     platforms = [platform_data(pl) for pl in PLATFORMS]
     base = Dict{String,Any}(
         "brands" => brand_names(app), "states" => collect(PROJECT_STATES), "notice" => notice,
+        "brand_details" => [Dict("name"=>b.name, "platforms"=>b.platforms, "notes"=>b.notes, "in_use"=>brand_in_use(app,b.name)) for b in app.settings.brands],
         "platforms" => platforms, "folder" => projects_dir(app),
         "brand_platforms" => Dict(b.name => b.platforms for b in app.settings.brands),
         "sources" => vcat(platforms, Dict{String,Any}("id" => "github", "name" => "GitHub", "color" => "#24292f")))
@@ -175,7 +176,7 @@ end
 
 # ── what the page sends ─────────────────────────────────────────────────────
 
-const PANE_ACTIONS = ("new", "rescan", "start", "open", "overview", "add_account", "remove_account",
+const PANE_ACTIONS = ("save_brand", "delete_brand", "new", "rescan", "start", "open", "overview", "add_account", "remove_account",
                       "title", "brands", "brief", "link", "state", "approve", "approve_all", "publish_all", "unapprove", "changes",
                       "edit", "remove", "publish", "mark", "retry", "answer", "ask_answer", "ask_answers",
                       "send", "ignore", "inbox_answer", "inbox_send", "inbox_done", "inbox_ignore", "inbox_reopen",
@@ -199,6 +200,10 @@ end
 struct OpenPage
     url::String
 end
+pane_action!(d::Dashboard, ::Val{:save_brand}, original::AbstractString, v::AbstractDict) =
+    save_brand!(d.app, original, v["name"], v["platforms"], v["notes"])
+pane_action!(d::Dashboard, ::Val{:delete_brand}, original::AbstractString, ::Nothing) =
+    save_brand!(d.app, original, "", String[], ""; remove=true)
 
 pane_action!(d::Dashboard, ::Val{:new}, ::Nothing, v::AbstractDict) = new_project!(d.app, v["title"], v["brands"], v["brief"])
 pane_action!(d::Dashboard, ::Val{:rescan}, ::Nothing, ::Nothing) = scan_projects!(d.app)

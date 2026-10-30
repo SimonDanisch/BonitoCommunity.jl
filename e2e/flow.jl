@@ -100,6 +100,17 @@ try
     TK.wait_for(s, "the overview", "!!document.querySelector('.cm-grid .cm-project')"; timeout = 30)
     shot(s, "1-overview-new")
 
+    js(s, "document.querySelector('[data-act=toggle-brands]').click(); true")
+    TK.wait_for(s, "brand editor", "!!document.querySelector('[data-act=save-brand]')"; timeout=10)
+    js(s, "(() => {const f=[...document.querySelectorAll('[data-box=brand-editor]')].at(-1); f.querySelector('[name=brand_name]').value='Browser brand'; f.querySelector('[name=brand_notes]').value='Friendly posts'; f.querySelector('[name=brand_platform][value=bluesky]').checked=true; f.querySelector('[data-act=save-brand]').click(); return true;})()")
+    @test TK.wait_for(s, "brand created", "!!document.querySelector('[data-act=save-brand][data-id=\"Browser brand\"]')"; timeout=10)
+    js(s, "(() => {const f=document.querySelector('[data-act=save-brand][data-id=\"Browser brand\"]').closest('[data-box]'); f.querySelector('[name=brand_notes]').value='Updated browser instructions'; f.querySelector('[data-act=save-brand]').click(); return true;})()")
+    @test TK.wait_for(s, "brand instructions saved", "document.querySelector('[data-act=save-brand][data-id=\"Browser brand\"]').closest('[data-box]').querySelector('[name=brand_notes]').textContent==='Updated browser instructions'"; timeout=10)
+    shot(s, "1c-brand-editor")
+    js(s, "document.querySelector('[data-act=delete-brand][data-id=\"Browser brand\"]').click(); true")
+    @test TK.wait_for(s, "unused brand deleted", "!document.querySelector('[data-act=save-brand][data-id=\"Browser brand\"]')"; timeout=10)
+    js(s, "document.querySelector('[data-act=toggle-brands]').click(); true")
+
     # Exercise first-use PIN setup through the real dashboard, including the
     # modal's visible inputs and its submit action.
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")

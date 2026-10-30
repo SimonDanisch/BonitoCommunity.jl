@@ -64,6 +64,21 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test only(filter(p -> p["id"] == "discourse", data["platforms"]))["color"] == "#9558b2"
     end
 
+    @testset "editable brands persist without changing other settings" begin
+        old = app.settings
+        CM.save_brand!(app, "", "Test brand", ["bluesky"], "Friendly and concise")
+        @test CM.find_brand(app, "Test brand").notes == "Friendly and concise"
+        @test_throws BT.AppError CM.save_brand!(app, "", "test BRAND", ["mastodon"], "")
+        @test_throws BT.AppError CM.save_brand!(app, "", "Bad platform", ["unknown"], "")
+        CM.save_brand!(app, "Test brand", "Renamed brand", ["mastodon"], "Updated tone")
+        saved = BT.load_json_tolerant(joinpath(app.ctx.dir, "settings.json"), "settings", CM.Settings)
+        @test saved.brands_customized && saved.projects_dir == old.projects_dir && saved.youtube_privacy == old.youtube_privacy
+        @test only(filter(b -> b.name == "Renamed brand", saved.brands)).notes == "Updated tone"
+        @test CM.upgrade_settings(saved) === saved
+        CM.save_brand!(app, "Renamed brand", "", String[], ""; remove=true)
+        @test !("Renamed brand" in CM.brand_names(app))
+    end
+
     @testset "platforms" begin
         @test CM.find_platform("Bluesky") === CM.Bluesky()
         @test_throws BT.AppError CM.find_platform("myspace")
@@ -418,7 +433,11 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
     end
 
     @testset "state survives a restart" begin
+        @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "Renamed", ["youtube"], "")
+        @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "", String[], ""; remove=true)
+        @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "Makie4Science", ["youtube"], "")
         again = CommunityApp(app.ctx; poll = false)
+        @test CM.brand_names(again) == CM.brand_names(app)
         for f in (:projects, :drafts, :accounts, :replies, :inbox)
             @test all(splat(same), zip(getfield(again.state[], f), getfield(app.state[], f)))
         end

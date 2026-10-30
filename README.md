@@ -26,6 +26,11 @@ A BonitoAgents app for the community work around Makie, Bonito and Makie4Science
 
 ## Accounts (overview → Accounts)
 
+Use **Brands** in the overview to add brands and edit their platforms and
+writing instructions. Changes apply immediately and persist in `settings.json`.
+Unused brands can be renamed or deleted; names referenced by projects, drafts
+or accounts stay fixed to preserve those references.
+
 - Bluesky: handle + app password. Mastodon: handle + access token (read, write).
 - YouTube: enable YouTube Data API v3 and create a **Web application** OAuth
   client. Register the callback URL shown in the YouTube card. Save the client

@@ -6,7 +6,7 @@ export class DashboardController {
         redirect();
         this.redirectObserver = new MutationObserver(redirect);
         this.redirectObserver.observe(root, {childList:true, subtree:true});
-        this.ui = {showNew: false, showAccounts: false, showHandled: false};
+        this.ui = {showNew: false, showAccounts: false, showHandled: false, showBrands: false};
         root.addEventListener('click', e => this.click(e));
         root.addEventListener('change', e => { if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value); });
         root.addEventListener('focusout', e => this.save(e.target));
@@ -101,8 +101,12 @@ export class DashboardController {
         const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
         e.stopPropagation(); const a = b.dataset.act, id = b.dataset.id ?? null, num = Number(b.dataset.num ?? id), box = b.closest('[data-box]');
         switch (a) {
-            case 'toggle-new': return this.view({showNew: !this.ui.showNew, showAccounts: false});
-            case 'toggle-accounts': return this.view({showAccounts: !this.ui.showAccounts, showNew: false});
+            case 'toggle-brands': return this.view({showBrands:!this.ui.showBrands, showAccounts:false, showNew:false});
+            case 'save-brand': return this.send('save_brand', id, {name:box.querySelector('[name=brand_name]').value.trim(), notes:box.querySelector('[name=brand_notes]').value,
+                platforms:[...box.querySelectorAll('[name=brand_platform]:checked')].map(n=>n.value)});
+            case 'delete-brand': return this.send('delete_brand', id);
+            case 'toggle-new': return this.view({showNew: !this.ui.showNew, showAccounts: false, showBrands:false});
+            case 'toggle-accounts': return this.view({showAccounts: !this.ui.showAccounts, showNew: false, showBrands:false});
             case 'toggle-handled': return this.view({showHandled: !this.ui.showHandled});
             case 'filter': return this.view({filter: b.dataset.value});
             case 'mark-open': return this.view({marking: num});

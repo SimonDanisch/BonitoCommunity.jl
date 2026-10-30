@@ -18,7 +18,8 @@ class DashboardController {
         this.ui = {
             showNew: false,
             showAccounts: false,
-            showHandled: false
+            showHandled: false,
+            showBrands: false
         };
         root.addEventListener('click', (e)=>this.click(e));
         root.addEventListener('change', (e)=>{
@@ -176,15 +177,33 @@ class DashboardController {
         e.stopPropagation();
         const a = b.dataset.act, id = b.dataset.id ?? null, num = Number(b.dataset.num ?? id), box = b.closest('[data-box]');
         switch(a){
+            case 'toggle-brands':
+                return this.view({
+                    showBrands: !this.ui.showBrands,
+                    showAccounts: false,
+                    showNew: false
+                });
+            case 'save-brand':
+                return this.send('save_brand', id, {
+                    name: box.querySelector('[name=brand_name]').value.trim(),
+                    notes: box.querySelector('[name=brand_notes]').value,
+                    platforms: [
+                        ...box.querySelectorAll('[name=brand_platform]:checked')
+                    ].map((n)=>n.value)
+                });
+            case 'delete-brand':
+                return this.send('delete_brand', id);
             case 'toggle-new':
                 return this.view({
                     showNew: !this.ui.showNew,
-                    showAccounts: false
+                    showAccounts: false,
+                    showBrands: false
                 });
             case 'toggle-accounts':
                 return this.view({
                     showAccounts: !this.ui.showAccounts,
-                    showNew: false
+                    showNew: false,
+                    showBrands: false
                 });
             case 'toggle-handled':
                 return this.view({

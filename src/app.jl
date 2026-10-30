@@ -14,12 +14,14 @@ JSON.@defaults struct Settings
     watches::Vector{Watch} = DEFAULT_WATCHES
     # What YouTube uploads start as. An API project Google hasn't audited can only upload private videos.
     youtube_privacy::String = "private"
+    brands_customized::Bool = false
 end
 
 # Discourse became a first-class, manually published release destination after
 # the first settings files existed.  Carry the two built-in library brands
 # forward without changing any custom brand or its other choices.
 function upgrade_settings(settings::Settings)
+    settings.brands_customized && return settings
     changed = false
     brands = Brand[]
     for b in settings.brands
@@ -40,7 +42,7 @@ mutable struct CommunityApp <: AgentApp
     const secrets_file::String
     # Non-nothing only during one PIN-authorised dashboard operation.
     const active_secrets::Base.RefValue{Union{Nothing,Dict{String,String}}}
-    const settings::Settings
+    settings::Settings
     const state::Observable{CommunityFile}
     # Logged-in Bluesky accounts, by account id.
     const sessions::Dict{String,Session}
@@ -89,6 +91,43 @@ BonitoAgents.app_icon(::CommunityApp) = joinpath(@__DIR__, "community.svg")
 
 projects_dir(app::CommunityApp) = app.settings.projects_dir
 brand_names(app::CommunityApp) = [b.name for b in app.settings.brands]
+
+function brand_in_use(app::CommunityApp, name::AbstractString)
+    s = app.state[]
+    any(p -> name in p.brands, s.projects) || any(d -> d.brand == name, s.drafts) ||
+        any(a -> a.brand == name, s.accounts)
+end
+
+function save_brand!(app::CommunityApp, original::AbstractString, name::AbstractString, platforms, notes::AbstractString; remove=false)
+    lock(app.lock) do
+        brands = copy(app.settings.brands)
+        i = isempty(original) ? nothing : findfirst(b -> b.name == original, brands)
+        isempty(original) || i !== nothing || throw(AppError("this brand no longer exists; refresh the editor"))
+        n = strip(name)
+        isempty(n) && !remove && throw(AppError("enter a brand name"))
+        if remove || (!isempty(original) && n != original)
+            brand_in_use(app, original) && throw(AppError("this brand is used by projects, drafts or accounts; its name must stay unchanged"))
+        end
+        if remove
+            i === nothing && throw(AppError("choose an existing brand"))
+            deleteat!(brands, i)
+        else
+            any(b -> b.name != original && lowercase(b.name) == lowercase(n), brands) && throw(AppError("that brand name already exists"))
+            ps = unique([platform_id(find_platform(p)) for p in platforms])
+            isempty(ps) && throw(AppError("choose at least one platform"))
+            any(a -> a.brand == original && !(a.platform in ps), app.state[].accounts) && throw(AppError("remove the connected account before disabling its platform"))
+            any(d -> d.brand == original && !(d.platform in ps), app.state[].drafts) && throw(AppError("a draft uses a platform you are disabling"))
+            brand = Brand(n, ps, strip(notes))
+            i === nothing ? push!(brands, brand) : (brands[i] = brand)
+        end
+        old = app.settings
+        settings = Settings(old.projects_dir, brands, old.watches, old.youtube_privacy, true)
+        atomic_write_json(joinpath(app.ctx.dir, "settings.json"), settings)
+        app.settings = settings
+    end
+    notify(app.state)
+    return nothing
+end
 
 function find_brand(app::CommunityApp, name::AbstractString)
     i = findfirst(b -> lowercase(b.name) == lowercase(strip(name)), app.settings.brands)

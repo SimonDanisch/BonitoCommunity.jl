@@ -138,6 +138,24 @@ function accounts_view(d)
     box("cm-card cm-panel", header..., grid, button("Close", "toggle-accounts"; kind = "ghost"); dataBox = "accounts")
 end
 
+function brands_view(data)
+    function editor(b)
+        name = b["name"]
+        box("cm-card cm-panel",
+            field("Brand name", input("brand_name", "e.g. My project"; value=name, readonly=b["in_use"])),
+            b["in_use"] ? hint("This name is used by projects or accounts. Platforms and instructions can be edited here.") : nothing,
+            label("Platforms"),
+            box("cm-row", [node("label", "cm-field", node("input", ""; type="checkbox", name="brand_platform", value=p["id"], checked=p["id"] in b["platforms"]), p["name"]) for p in data["platforms"]]),
+            field("Writing instructions", node("textarea", "cm-input", b["notes"]; name="brand_notes", rows=4, placeholder="Topics, tone, audience and links for the agent")),
+            box("cm-row", button(isempty(name) ? "Create brand" : "Save brand", "save-brand"; id=name, kind="primary"),
+                isempty(name) || b["in_use"] ? nothing : button("Delete brand", "delete-brand"; id=name, kind="danger")); dataBox="brand-editor")
+    end
+    box("cm-panel", label("Brands"), hint("Changes are saved on the server and survive redeployments."),
+        [editor(b) for b in data["brand_details"]],
+        label("Add a brand"), editor(Dict("name"=>"", "platforms"=>String[], "notes"=>"", "in_use"=>false)),
+        button("Close", "toggle-brands"; kind="ghost"))
+end
+
 function new_project_view(d)
     box("cm-card cm-panel", label("New project"), input("title", "Title, e.g. BonitoAgents release"), brands_toggle(d["brands"], String[]),
         node("textarea", "cm-textarea"; name = "brief", placeholder = "What it is about, what the posts should say"),
@@ -263,16 +281,17 @@ function dashboard_dom(session, d)
     # Construct collection containers once. Their KeyedLists keep surviving
     # widget instances and only insert/remove/move changed identities.
     data = dashboard_data(d, d.app.state[], d.app.notice[])
-    keys = data["mode"] == "overview" ? ("top", "notice", "new", "accounts", "inbox", "grid") : ("top", "notice", "hero", "drafts", "replies")
+    keys = data["mode"] == "overview" ? ("top", "notice", "new", "accounts", "brands", "inbox", "grid") : ("top", "notice", "hero", "drafts", "replies")
     regions = [r(k, nothing, () -> DOM.div(; hidden = true)) for k in keys]
     function update()
         data = dashboard_data(d, d.app.state[], d.app.notice[]); ui = d.ui[]
         r("notice", data["notice"], () -> isempty(data["notice"]) ? DOM.div(; hidden = true) : box("cm-notice", data["notice"]))
         if data["mode"] == "overview"
             ps = data["projects"]
-            r("top", [length(ps), length(data["accounts"])], () -> box("cm-top", box("", node("h1", "cm-h1", "Community"), box("cm-sub", "$(length(ps)) projects")), spacer(), button("Accounts ($(length(data["accounts"])))", "toggle-accounts"), button("Rescan", "rescan"; kind = "ghost"), button("New project", "toggle-new"; kind = "primary")))
-            r("new", ui["showNew"], () -> ui["showNew"] ? new_project_view(data) : DOM.div(; hidden = true))
-            r("accounts", [ui["showAccounts"], data["vault_set"], data["accounts"], data["youtube_url"]], () -> ui["showAccounts"] ? accounts_view(data) : DOM.div(; hidden = true))
+            r("top", [length(ps), length(data["accounts"])], () -> box("cm-top", box("", node("h1", "cm-h1", "Community"), box("cm-sub", "$(length(ps)) projects")), spacer(), button("Accounts ($(length(data["accounts"])))", "toggle-accounts"), button("Brands", "toggle-brands"), button("Rescan", "rescan"; kind = "ghost"), button("New project", "toggle-new"; kind = "primary")))
+            r("brands", [ui["showBrands"], data["brand_details"]], () -> ui["showBrands"] ? brands_view(data) : DOM.div(; hidden=true))
+            r("new", [ui["showNew"], data["brand_details"]], () -> ui["showNew"] ? new_project_view(data) : DOM.div(; hidden = true))
+            r("accounts", [ui["showAccounts"], data["vault_set"], data["accounts"], data["youtube_url"], data["brand_details"]], () -> ui["showAccounts"] ? accounts_view(data) : DOM.div(; hidden = true))
             messages = filter(x -> ui["showHandled"] || x["status"] in ("new", "drafted"), data["inbox"])
             inbox_list = list("inbox-items", messages, x -> x["ref"], x -> message_card(x; inbox = true))
             r("inbox", [isempty(messages), ui["showHandled"]], () -> box("cm-section", box("cm-section-head", label("Inbox"), spacer(), button("Check updates", "check-updates"; kind = "ghost"), button("Handled", "toggle-handled"; kind = "ghost"), button("Draft answers", "inbox_ask_all")), isempty(messages) ? box("cm-empty", "Nothing new. Mentions, forum topics and releases show up here.") : box("cm-replies", inbox_list)))
