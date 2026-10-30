@@ -56,10 +56,9 @@ class DashboardController {
             if (!open) this.finishPin(null);
         });
         feedback.on((msg)=>{
-            if (!msg) return;
             const toast = root.querySelector('.cm-toast');
             toast.textContent = msg;
-            toast.hidden = false;
+            toast.hidden = !msg;
             toast.onclick = ()=>toast.hidden = true;
         });
     }

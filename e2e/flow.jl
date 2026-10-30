@@ -10,6 +10,9 @@
 using BonitoAgents, BonitoCommunity, Dates, Test
 const BT = BonitoAgents
 const CM = BonitoCommunity
+# Fake only the external credential check; connection is submitted through the UI.
+@eval CM verify_account(::Mastodon, a::Account, token::AbstractString) =
+    token == "e2e-only-token" ? nothing : throw(AppError("invalid test token"))
 include(joinpath(pkgdir(BonitoAgents), "test", "testkit", "TestKit.jl"))
 const TK = TestKit
 
@@ -136,6 +139,16 @@ try
     js(s, "(() => { const p = document.querySelector('.cm-pin-dialog'); p.querySelectorAll('input').forEach(i => i.value = 'e2e-only PIN'); p.querySelector('[data-act=pin-submit]').click(); return true; })()")
     TK.wait_for(s, "the account cards after setting PIN", "!!document.querySelector('.cm-platform-grid')"; timeout = 10)
     @test CM.vault_exists(app)
+    js(s, "document.querySelector('[data-box=account-mastodon] [data-act=add-account]').click(); true")
+    TK.wait_for(s, "empty account PIN", "!!document.querySelector('.cm-pin-dialog .bw-modal-open input')"; timeout=10)
+    js(s, "document.querySelector('.cm-pin-dialog [name=pin]').value='e2e-only PIN'; document.querySelector('[data-act=pin-submit]').click(); true")
+    @test TK.wait_for(s, "missing handle is reported", "document.querySelector('.cm-toast').textContent.includes('needs its handle')"; timeout=10)
+    TK.set_input(s, "[data-box=account-mastodon] [data-account-form=post] [name=handle]", "test-account@fosstodon.org")
+    TK.set_input(s, "[data-box=account-mastodon] [data-account-form=post] [name=secret]", "e2e-only-token")
+    js(s, "document.querySelector('[data-box=account-mastodon] [data-act=add-account]').click(); true")
+    TK.wait_for(s, "filled account PIN", "!!document.querySelector('.cm-pin-dialog .bw-modal-open input')"; timeout=10)
+    js(s, "document.querySelector('.cm-pin-dialog [name=pin]').value='e2e-only PIN'; document.querySelector('[data-act=pin-submit]').click(); true")
+    @test TK.wait_for(s, "account connects and stale error clears", "document.querySelector('[data-box=account-mastodon] .cm-configured').textContent.includes('test-account@fosstodon.org') && document.querySelector('.cm-toast').hidden"; timeout=10)
     @test js(s, "!!document.querySelector('[data-act=google-client]') && !!document.querySelector('[data-act=connect-youtube]')")
     @test js(s, "document.querySelector('[name=youtube_redirect]').value === location.origin + '/community-youtube-callback'")
     js(s, "document.querySelector('[data-act=connect-youtube]').click(); true")

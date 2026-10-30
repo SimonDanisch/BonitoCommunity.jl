@@ -186,6 +186,7 @@ const PANE_ACTIONS = ("save_brand", "delete_brand", "new", "rescan", "start", "o
 # wrong, a draft another tab just removed) is said in this tab, not more.
 function pane_action!(d::Dashboard, tab::NamedTuple, action::AbstractString, id, value)
     action in PANE_ACTIONS || throw(AppError("unknown Community action: $action"))
+    tab.feedback[] = ""
     try
         r = pane_action!(d, Val(Symbol(action)), id, value)
         r isa OpenPage && (tab.navigate[] = r.url)

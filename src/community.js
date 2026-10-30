@@ -30,8 +30,7 @@ export class DashboardController {
         // same observable. Cancel the pending action and clear browser fields.
         pinOpen.on(open => { if (!open) this.finishPin(null); });
         feedback.on(msg => {
-            if (!msg) return;
-            const toast = root.querySelector('.cm-toast'); toast.textContent = msg; toast.hidden = false;
+            const toast = root.querySelector('.cm-toast'); toast.textContent = msg; toast.hidden = !msg;
             toast.onclick = () => toast.hidden = true;
         });
     }
