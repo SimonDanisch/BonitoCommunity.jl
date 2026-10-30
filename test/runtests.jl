@@ -442,7 +442,10 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "Renamed", ["youtube"], "")
         @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "", String[], ""; remove=true)
         @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "Makie4Science", ["youtube"], "")
+        encrypted_before = read(app.secrets_file)
         again = CommunityApp(app.ctx; poll = false)
+        @test read(again.secrets_file) == encrypted_before
+        @test CM.read_vault(again, PIN) == CM.read_vault(app, PIN)
         @test CM.brand_names(again) == CM.brand_names(app)
         for f in (:projects, :drafts, :accounts, :replies, :inbox)
             @test all(splat(same), zip(getfield(again.state[], f), getfield(app.state[], f)))
