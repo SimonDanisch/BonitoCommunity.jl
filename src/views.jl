@@ -23,7 +23,11 @@ end
 # Small helpers keep attributes declarative, including data attributes consumed
 # by the browser controller. Dynamic colours use Styles, never CSS strings.
 function node(tag, cls, children...; kw...)
-    getproperty(DOM, Symbol(tag))(filter(!isnothing, collect(children))...; class = cls, kw...)
+    content = filter(!isnothing, collect(children))
+    if "cm-card" in split(cls)
+        return AppCard(content...; tag = Symbol(tag), class = cls, kw...)
+    end
+    return getproperty(DOM, Symbol(tag))(content...; class = cls, kw...)
 end
 box(cls, children...; kw...) = node("div", cls, children...; kw...)
 label(text) = box("cm-h2", text)
@@ -34,7 +38,7 @@ function button(text, action; kind = "secondary", id = nothing, value = nothing,
     isnothing(id) || (attrs[Symbol("data-id")] = id)
     isnothing(value) || (attrs[Symbol("data-value")] = value)
     isnothing(num) || (attrs[Symbol("data-num")] = num)
-    node("button", "cm-btn cm-btn-sm cm-btn-$kind", text; type = "button", attrs..., kw...)
+    AppButton(text; variant = Symbol(kind), size = :small, attrs..., kw...)
 end
 link(text, url; cls = "cm-sub") = node("a", cls, text; href = url, target = "_blank", rel = "noopener")
 status(text) = node("span", "cm-status cm-status-$text", text)
@@ -44,7 +48,7 @@ function dropdown(name, options; selected = "", kw...)
     node("select", "cm-select", [node("option", "", x; value = x, selected = x == selected) for x in options]...; name, kw...)
 end
 const BRAND_COLORS = Dict("Makie" => "#e05a7a", "Bonito" => "#2f9e8f", "Makie4Science" => "#3a7fc4")
-brand_style(name) = Styles("--dot" => get(BRAND_COLORS, name, "var(--cm-accent)"))
+brand_style(name) = Styles("--dot" => get(BRAND_COLORS, name, "var(--bw-accent)"))
 brand_pill(name) = node("span", "cm-pill cm-pill-dot", name; style = brand_style(name))
 function brands_toggle(brands, selected; project = "")
     box("cm-row", [node("button", "cm-pill cm-pill-dot cm-brand-toggle" * (b in selected ? " cm-on" : ""), b;
@@ -62,13 +66,15 @@ function stepper(states, state)
     box("cm-steps", [box("cm-step" * (i < index ? " cm-step-done" : i == index ? " cm-step-now" : "")) for i in eachindex(states)]...)
 end
 
-function pin_dialog()
-    node("dialog", "cm-pin-dialog",
+function pin_dialog(open)
+    modal = AppModal(open; title = "Community credentials") do
         node("form", "cm-pin-form", box("cm-h2", ""; dataPin = "title"), hint("Credentials are unlocked only for this action."),
              input("pin", "Community PIN"; type = "password"), input("pin_confirmation", "Repeat PIN"; type = "password"),
              box("cm-hint", ""; dataPin = "error"),
              box("cm-row", button("Continue", "pin-submit"; kind = "primary"), button("Cancel", "pin-cancel"; kind = "ghost"));
-             method = "dialog"))
+             autocomplete = "off")
+    end
+    return box("cm-pin-dialog", modal)
 end
 
 function network_card(d, platform, title, instructions, handle_label, placeholder, secret_label)

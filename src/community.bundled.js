@@ -3,9 +3,10 @@
 // This code was bundled using `deno bundle` and it's not recommended to edit it manually
 
 class DashboardController {
-    constructor(root, dialog, actions, feedback){
+    constructor(root, dialog, pinOpen, actions, feedback){
         this.root = root;
         this.dialog = dialog;
+        this.pinOpen = pinOpen;
         this.actions = actions;
         this.ui = {
             showNew: false,
@@ -30,19 +31,21 @@ class DashboardController {
         });
         dialog.addEventListener('click', (e)=>{
             const act = e.target.closest('[data-act]')?.dataset.act;
-            if (act === 'pin-cancel') dialog.close('cancel');
+            if (act === 'pin-cancel') this.closePin(null);
             if (act === 'pin-submit') this.submitPin();
         });
-        dialog.querySelector('form').addEventListener('submit', (e)=>{
+        dialog.addEventListener('submit', (e)=>{
             e.preventDefault();
             this.submitPin();
         });
-        dialog.addEventListener('close', ()=>{
-            const resolve = this.pendingPin;
-            this.pendingPin = null;
-            const pin = dialog.returnValue === 'ok' ? dialog.querySelector('[name=pin]').value : null;
-            dialog.querySelectorAll('input').forEach((n)=>n.value = '');
-            resolve?.(pin);
+        dialog.addEventListener('keydown', (e)=>{
+            if (e.key === 'Enter' && e.target.matches('input')) {
+                e.preventDefault();
+                this.submitPin();
+            }
+        });
+        pinOpen.on((open)=>{
+            if (!open) this.finishPin(null);
         });
         feedback.on((msg)=>{
             if (!msg) return;
@@ -66,15 +69,37 @@ class DashboardController {
     askPin(title, confirm = false) {
         if (this.pendingPin) throw new Error('A PIN action is already pending');
         const d = this.dialog;
-        d.querySelector('[data-pin=title]').textContent = title;
-        d.querySelector('[data-pin=error]').textContent = '';
-        d.querySelector('[name=pin_confirmation]').hidden = !confirm;
-        d.querySelector('[data-act=pin-submit]').textContent = confirm ? 'Set PIN' : 'Continue';
-        d.returnValue = '';
         const result = new Promise((resolve)=>this.pendingPin = resolve);
-        d.showModal();
-        d.querySelector('[name=pin]').focus();
+        const ready = ()=>{
+            const first = d.querySelector('[name=pin]');
+            if (!first) return;
+            this.pinObserver?.disconnect();
+            this.pinObserver = null;
+            d.querySelector('[data-pin=title]').textContent = title;
+            d.querySelector('[data-pin=error]').textContent = '';
+            d.querySelector('[name=pin_confirmation]').hidden = !confirm;
+            d.querySelector('[data-act=pin-submit]').textContent = confirm ? 'Set PIN' : 'Continue';
+            first.focus();
+        };
+        this.pinObserver = new MutationObserver(ready);
+        this.pinObserver.observe(d, {
+            childList: true,
+            subtree: true
+        });
+        this.pinOpen.notify(true);
         return result;
+    }
+    finishPin(pin) {
+        this.pinObserver?.disconnect();
+        this.pinObserver = null;
+        this.dialog.querySelectorAll('input').forEach((n)=>n.value = '');
+        const resolve = this.pendingPin;
+        this.pendingPin = null;
+        resolve?.(pin);
+    }
+    closePin(pin) {
+        this.finishPin(pin);
+        this.pinOpen.notify(false);
     }
     submitPin() {
         const d = this.dialog, first = d.querySelector('[name=pin]'), second = d.querySelector('[name=pin_confirmation]');
@@ -87,7 +112,7 @@ class DashboardController {
             error.textContent = 'The PINs do not match.';
             return;
         }
-        d.close('ok');
+        this.closePin(first.value);
     }
     async pinAction(title, action, id = null, value = null) {
         const pin = await this.askPin(title);

@@ -10,8 +10,9 @@ Follow Bonito's widget architecture (Bonito.jl/AGENTS.md):
   collections. Keep media separate from brief and link updates.
 - The ES6 `DashboardController` receives its root/dialog nodes and observable
   channels from Julia. Keep JavaScript limited to browser interactions.
-- Theme variables and button classes belong to Community. Never depend on
-  BonitoAgents' internal CSS classes or theme variables.
+- Use BonitoAgents' public AppButton, AppCard, AppModal and AppUIStyles, backed
+  by the server's BonitoWidgets theme (`--bw-*`). Community owns only layout
+  and platform colours. Never copy shared control styles into this package.
 - Run the browser walkthrough after UI changes, including first-use PIN setup,
   per-platform review, and preservation of unrelated cards and media nodes.
   Confirm the eval session loaded the edited code; restart if Revise is absent.

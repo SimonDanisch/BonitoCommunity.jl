@@ -105,13 +105,33 @@ try
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
     TK.wait_for(s, "the initial account setup", "!!document.querySelector('[data-act=set-pin]')"; timeout = 10)
     js(s, "document.querySelector('[data-act=set-pin]').click(); true")
-    TK.wait_for(s, "the PIN dialog inputs", "document.querySelectorAll('.cm-pin-dialog[open] input').length === 2"; timeout = 10)
+    TK.wait_for(s, "the PIN dialog inputs", "document.querySelectorAll('.cm-pin-dialog .bw-modal-open input').length === 2"; timeout = 10)
     @test js(s, "document.querySelector('.cm-pin-dialog input').getBoundingClientRect().height > 0")
     shot(s, "1b-set-pin")
-    js(s, "(() => { const p = document.querySelector('.cm-pin-dialog'); p.querySelectorAll('input').forEach(i => i.value = 'e2e-only PIN'); p.querySelector('button').click(); return true; })()")
+    # Dismiss through the shared modal, then reopen with a fresh, empty body.
+    js(s, "document.querySelector('.cm-pin-dialog .bw-modal-close').click(); true")
+    TK.wait_for(s, "the PIN modal closed", "!document.querySelector('.cm-pin-dialog .bw-modal-open')"; timeout = 10)
+    js(s, "document.querySelector('[data-act=set-pin]').click(); true")
+    TK.wait_for(s, "the PIN modal reopened", "!!document.querySelector('.cm-pin-dialog .bw-modal-open input')"; timeout = 10)
+    @test js(s, "document.querySelector('.cm-pin-dialog input').value") == ""
+    js(s, "document.querySelector('.cm-pin-dialog input').dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); true")
+    TK.wait_for(s, "Escape dismisses the PIN modal", "!document.querySelector('.cm-pin-dialog .bw-modal-open')"; timeout = 10)
+    js(s, "document.querySelector('[data-act=set-pin]').click(); true")
+    TK.wait_for(s, "the PIN modal for backdrop dismissal", "!!document.querySelector('.cm-pin-dialog .bw-modal-open input')"; timeout = 10)
+    js(s, "(() => { const b = document.querySelector('.cm-pin-dialog .bw-modal-overlay'); b.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); b.click(); return true; })()")
+    TK.wait_for(s, "the backdrop dismisses the PIN modal", "!document.querySelector('.cm-pin-dialog .bw-modal-open')"; timeout = 10)
+    js(s, "document.querySelector('[data-act=set-pin]').click(); true")
+    TK.wait_for(s, "the PIN modal for submission", "!!document.querySelector('.cm-pin-dialog .bw-modal-open input')"; timeout = 10)
+    js(s, "(() => { const p = document.querySelector('.cm-pin-dialog'); p.querySelectorAll('input').forEach(i => i.value = 'e2e-only PIN'); p.querySelector('[data-act=pin-submit]').click(); return true; })()")
     TK.wait_for(s, "the account cards after setting PIN", "!!document.querySelector('.cm-platform-grid')"; timeout = 10)
     @test CM.vault_exists(app)
     @test js(s, "getComputedStyle(document.querySelector('[data-act=create], [data-act=toggle-new]')).borderRadius !== '0px'")
+    # Server theme variables control both plugin surfaces and shared buttons.
+    js(s, "document.documentElement.style.setProperty('--bw-accent', '#8b5cf6'); document.documentElement.style.setProperty('--bw-bg-panel', '#fef3c7'); true")
+    TK.wait_for(s, "the shared button theme transition", "getComputedStyle(document.querySelector('[data-act=toggle-new]')).backgroundColor === 'rgb(139, 92, 246)'"; timeout = 5)
+    @test js(s, "getComputedStyle(document.querySelector('[data-act=toggle-new]')).backgroundColor") == "rgb(139, 92, 246)"
+    @test js(s, "getComputedStyle(document.querySelector('.cm-platform-card')).backgroundColor") == "rgb(254, 243, 199)"
+    js(s, "document.documentElement.style.removeProperty('--bw-accent'); document.documentElement.style.removeProperty('--bw-bg-panel'); true")
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
 
     # pick the brands on the black hole card, then start drafting

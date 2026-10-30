@@ -1,7 +1,7 @@
 // Julia renders the DOM; this instance handles browser-only interactions.
 export class DashboardController {
-    constructor(root, dialog, actions, feedback) {
-        this.root = root; this.dialog = dialog; this.actions = actions;
+    constructor(root, dialog, pinOpen, actions, feedback) {
+        this.root = root; this.dialog = dialog; this.pinOpen = pinOpen; this.actions = actions;
         this.ui = {showNew: false, showAccounts: false, showHandled: false};
         root.addEventListener('click', e => this.click(e));
         root.addEventListener('change', e => { if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value); });
@@ -15,15 +15,16 @@ export class DashboardController {
         root.addEventListener('dblclick', e => { const n = e.target.closest('[data-edit-title], .cm-draft-text[data-editable]'); if (n) this.edit(n); });
         dialog.addEventListener('click', e => {
             const act = e.target.closest('[data-act]')?.dataset.act;
-            if (act === 'pin-cancel') dialog.close('cancel');
+            if (act === 'pin-cancel') this.closePin(null);
             if (act === 'pin-submit') this.submitPin();
         });
-        dialog.querySelector('form').addEventListener('submit', e => { e.preventDefault(); this.submitPin(); });
-        dialog.addEventListener('close', () => {
-            const resolve = this.pendingPin; this.pendingPin = null;
-            const pin = dialog.returnValue === 'ok' ? dialog.querySelector('[name=pin]').value : null;
-            dialog.querySelectorAll('input').forEach(n => n.value = ''); resolve?.(pin);
+        dialog.addEventListener('submit', e => { e.preventDefault(); this.submitPin(); });
+        dialog.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); this.submitPin(); }
         });
+        // Escape, backdrop and the shared modal's close button all change the
+        // same observable. Cancel the pending action and clear browser fields.
+        pinOpen.on(open => { if (!open) this.finishPin(null); });
         feedback.on(msg => {
             if (!msg) return;
             const toast = root.querySelector('.cm-toast'); toast.textContent = msg; toast.hidden = false;
@@ -35,20 +36,36 @@ export class DashboardController {
     askPin(title, confirm = false) {
         if (this.pendingPin) throw new Error('A PIN action is already pending');
         const d = this.dialog;
-        d.querySelector('[data-pin=title]').textContent = title;
-        d.querySelector('[data-pin=error]').textContent = '';
-        d.querySelector('[name=pin_confirmation]').hidden = !confirm;
-        d.querySelector('[data-act=pin-submit]').textContent = confirm ? 'Set PIN' : 'Continue';
-        d.returnValue = '';
         const result = new Promise(resolve => this.pendingPin = resolve);
-        d.showModal(); d.querySelector('[name=pin]').focus(); return result;
+        const ready = () => {
+            const first = d.querySelector('[name=pin]');
+            if (!first) return;
+            this.pinObserver?.disconnect(); this.pinObserver = null;
+            d.querySelector('[data-pin=title]').textContent = title;
+            d.querySelector('[data-pin=error]').textContent = '';
+            d.querySelector('[name=pin_confirmation]').hidden = !confirm;
+            d.querySelector('[data-act=pin-submit]').textContent = confirm ? 'Set PIN' : 'Continue';
+            first.focus();
+        };
+        // BonitoWidgets builds a fresh body on open; wait for those interpolated
+        // nodes rather than constructing or querying any other widget's DOM.
+        this.pinObserver = new MutationObserver(ready);
+        this.pinObserver.observe(d, {childList: true, subtree: true});
+        this.pinOpen.notify(true);
+        return result;
     }
+    finishPin(pin) {
+        this.pinObserver?.disconnect(); this.pinObserver = null;
+        this.dialog.querySelectorAll('input').forEach(n => n.value = '');
+        const resolve = this.pendingPin; this.pendingPin = null; resolve?.(pin);
+    }
+    closePin(pin) { this.finishPin(pin); this.pinOpen.notify(false); }
     submitPin() {
         const d = this.dialog, first = d.querySelector('[name=pin]'), second = d.querySelector('[name=pin_confirmation]');
         const error = d.querySelector('[data-pin=error]');
         if (!first.value) { error.textContent = 'Enter the Community PIN.'; return; }
         if (!second.hidden && first.value !== second.value) { error.textContent = 'The PINs do not match.'; return; }
-        d.close('ok');
+        this.closePin(first.value);
     }
     async pinAction(title, action, id = null, value = null) {
         const pin = await this.askPin(title);

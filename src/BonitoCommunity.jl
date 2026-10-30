@@ -19,6 +19,7 @@ module BonitoCommunity
 
 import BonitoAgents
 using BonitoAgents: AgentApp, AppContext, AppTool, Param, ToolScope, AppChat, AppKeyedChats, AppCall, AppError,
+    AppButton, AppCard, AppModal, AppUIStyles,
     ProjectInfo, ChatHeader, ChatNotice, ChatTranscript, ChatComposer, ChatToolbar,
     caller_user, app_chat, chat_title, chat_key, chat_file_url, find_worker, start_chat!, show_chat!,
     send_message!, atomic_write_json, load_json_tolerant, relative_time_label
