@@ -1,8 +1,8 @@
-# YouTube (Data API v3): a Google login per channel (OAuth for installed apps,
-# with PKCE and a one-off callback on 127.0.0.1), resumable uploads, and the
+# YouTube (Data API v3): a Google login per channel (web OAuth with PKCE
+# and a callback on the home server), resumable uploads, and the
 # comments under a video as the project's replies.
 #
-# The OAuth client is a "Desktop app" client of the user's Google Cloud project
+# The OAuth client is a "Web application" client of the user's Google Cloud project
 # (YouTube Data API v3 enabled). Until Google has audited that project, what it
 # uploads stays private (`Settings.youtube_privacy`).
 
@@ -35,6 +35,7 @@ form(pairs...) = Vector{UInt8}(HTTP.escapeuri(Dict(pairs)))
 
 "A fresh access token for `a`'s channel, from its refresh token; kept for 50 minutes (they live an hour)."
 function google_access(app::CommunityApp, a::Account)
+    vault_active(app) || throw(AppError("enter the Community PIN before accessing YouTube"))
     s = lock(() -> get(app.sessions, a.id, nothing), app.lock)
     s === nothing || now(UTC) - s.at > Minute(50) || return s.access
     id, client_secret = google_client(app)
@@ -45,10 +46,64 @@ function google_access(app::CommunityApp, a::Account)
     return string(r["access_token"])
 end
 
+const YOUTUBE_CALLBACK = "/community-youtube-callback"
+
+function begin_youtube_login!(app::CommunityApp, brand::AbstractString, redirect::AbstractString, pin::AbstractString)
+    b = find_brand(app, brand)
+    "youtube" in b.platforms || throw(AppError("$(b.name) does not post on YouTube"))
+    uri = HTTP.URI(redirect)
+    uri.path == YOUTUBE_CALLBACK && isempty(uri.query) && isempty(uri.fragment) &&
+        (uri.scheme == "https" || (uri.scheme == "http" && uri.host in ("127.0.0.1", "localhost"))) ||
+        throw(AppError("use the server's HTTPS callback URL (HTTP is allowed on localhost)"))
+    id = with_vault!(app, pin) do
+        first(google_client(app))
+    end
+    isempty(id) && throw(AppError("save the Google OAuth client first"))
+    state, verifier = pkce_verifier(), pkce_verifier()
+    lock(app.lock) do
+        filter!(p -> now(UTC) - p.second.created < Minute(10), app.youtube_logins)
+        app.youtube_logins[state] = (brand=b.name, redirect=String(redirect), verifier, created=now(UTC), code="", error="")
+    end
+    srv = app.ctx.server.srv
+    srv === nothing || Bonito.route!(srv, YOUTUBE_CALLBACK => context -> youtube_callback!(app, context.request))
+    return state, consent_url(id, redirect, pkce_challenge(verifier), state)
+end
+
+function youtube_callback!(app::CommunityApp, req)
+    q = HTTP.queryparams(HTTP.URI(req.target))
+    status = lock(app.lock) do
+        state = get(q, "state", "")
+        pending = get(app.youtube_logins, state, nothing)
+        pending === nothing && return 400
+        now(UTC) - pending.created < Minute(10) || return 400
+        isempty(pending.code) && isempty(pending.error) || return 400
+        code, error = get(q, "code", ""), get(q, "error", "")
+        isempty(code) && isempty(error) && return 400
+        app.youtube_logins[state] = merge(pending, (; code, error))
+        return 200
+    end
+    notify(app.state)
+    message = status == 200 ? "Return to Community and enter your PIN to finish connecting YouTube." : "This login has expired or is invalid. Start again in Community."
+    return HTTP.Response(status, ["Content-Type"=>"text/html; charset=utf-8", "Cache-Control"=>"no-store", "Referrer-Policy"=>"no-referrer"], replace(LOGIN_PAGE, "%s"=>message))
+end
+
+function complete_youtube_login!(app::CommunityApp, state::AbstractString, pin::AbstractString; token_url=GOOGLE_TOKEN, channels_url="$YT_API/channels")
+    return with_vault!(app, pin) do
+        pending = get(app.youtube_logins, state, nothing)
+        pending === nothing && throw(AppError("start connecting YouTube again"))
+        now(UTC) - pending.created < Minute(10) || throw(AppError("YouTube login expired; start again"))
+        isempty(pending.error) || throw(AppError("Google declined the login; start again"))
+        isempty(pending.code) && throw(AppError("finish signing in with Google first"))
+        # Consume once: an OAuth code cannot be exchanged twice.
+        delete!(app.youtube_logins, state)
+        finish_youtube_login!(app, pending.brand, pending.code, pending.redirect, pending.verifier; token_url, channels_url)
+    end
+end
+
 # ── logging in ──────────────────────────────────────────────────────────────
 
 const URLSAFE = ['A':'Z'; 'a':'z'; '0':'9'; '-'; '.'; '_'; '~']
-pkce_verifier() = String(rand(URLSAFE, 64))
+pkce_verifier() = replace(base64encode(sodium_random(48)), '+' => '-', '/' => '_')
 pkce_challenge(verifier::AbstractString) =
     rstrip(replace(base64encode(SHA.sha256(verifier)), '+' => '-', '/' => '_'), '=')
 
@@ -69,55 +124,14 @@ end
 const LOGIN_PAGE = """<!doctype html><meta charset="utf-8"><title>Community</title>
 <body style="font-family:system-ui;padding:3em;text-align:center"><h2>%s</h2><p>You can close this tab.</p></body>"""
 
-"""
-    start_youtube_login!(app, brand) -> URL
-
-Start logging a YouTube channel in for `brand`: a listener on 127.0.0.1 waits up
-to five minutes for Google's redirect; the returned URL is Google's consent
-page. Once it comes back, the channel is added as `brand`'s YouTube account.
-The browser has to run on this machine (the redirect goes to 127.0.0.1).
-"""
-function start_youtube_login!(app::CommunityApp, brand::AbstractString)
-    b = find_brand(app, brand).name
-    "youtube" in find_brand(app, b).platforms || throw(AppError("$b does not post on YouTube"))
-    client_id, _ = google_client(app)
-    isempty(client_id) && throw(AppError("add the Google OAuth client first"))
-    port = free_port()
-    redirect = "http://127.0.0.1:$port"
-    verifier, state = pkce_verifier(), pkce_verifier()
-    answer = Channel{Pair{Symbol,String}}(1)
-    server = HTTP.serve!("127.0.0.1", port) do req
-        q = HTTP.queryparams(HTTP.URI(req.target))
-        get(q, "state", "") == state || return HTTP.Response(400, "unexpected request")
-        if haskey(q, "code")
-            isready(answer) || put!(answer, :code => q["code"])
-            return HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"],
-                                 replace(LOGIN_PAGE, "%s" => "Connected to YouTube"))
-        end
-        isready(answer) || put!(answer, :error => get(q, "error", "no code"))
-        return HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"],
-                             replace(LOGIN_PAGE, "%s" => "YouTube login failed: $(get(q, "error", "no code"))"))
-    end
-    timeout = Timer(_ -> isready(answer) || put!(answer, :error => "no answer within five minutes"), 300)
-    errormonitor(Threads.@spawn begin
-        kind, value = take!(answer)
-        close(timeout)
-        close(server)
-        r = kind === :code ? attempt(() -> finish_youtube_login!(app, b, value, redirect, verifier), "logging in to YouTube") :
-                             "Google said: $value"
-        app.notice[] = r isa Account ? "" : "Connecting YouTube failed: $r"
-    end)
-    return consent_url(client_id, redirect, pkce_challenge(verifier), state)
-end
-
 function finish_youtube_login!(app::CommunityApp, brand::AbstractString, code::AbstractString,
-                               redirect::AbstractString, verifier::AbstractString)
+                               redirect::AbstractString, verifier::AbstractString; token_url=GOOGLE_TOKEN, channels_url="$YT_API/channels")
     id, client_secret = google_client(app)
-    t = api("POST", GOOGLE_TOKEN; content_type = "application/x-www-form-urlencoded",
+    t = api("POST", token_url; content_type = "application/x-www-form-urlencoded",
             body = form("code" => code, "client_id" => id, "client_secret" => client_secret, "redirect_uri" => redirect,
                         "grant_type" => "authorization_code", "code_verifier" => verifier))
     haskey(t, "refresh_token") || throw(AppError("Google gave no refresh token; remove the app's access in your Google account and connect again"))
-    r = api("GET", "$YT_API/channels"; token = string(t["access_token"]), query = ["part" => "snippet", "mine" => "true"])
+    r = api("GET", channels_url; token = string(t["access_token"]), query = ["part" => "snippet", "mine" => "true"])
     isempty(get(r, "items", [])) && throw(AppError("that Google account has no YouTube channel"))
     ch = r["items"][1]
     handle = lstrip(string(something(get(ch["snippet"], "customUrl", nothing), ch["snippet"]["title"])), '@')

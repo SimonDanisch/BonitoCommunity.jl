@@ -43,7 +43,7 @@ end
 link(text, url; cls = "cm-sub") = node("a", cls, text; href = url, target = "_blank", rel = "noopener")
 status(text) = node("span", "cm-status cm-status-$text", text)
 field(text, input) = node("label", "cm-field", text, input)
-input(name, placeholder; type = "text") = node("input", "cm-input"; name, placeholder, type, autocomplete = type == "password" ? "new-password" : "off")
+input(name, placeholder; type = "text", kw...) = node("input", "cm-input"; name, placeholder, type, autocomplete = type == "password" ? "new-password" : "off", kw...)
 function dropdown(name, options; selected = "", kw...)
     node("select", "cm-select", [node("option", "", x; value = x, selected = x == selected) for x in options]...; name, kw...)
 end
@@ -98,6 +98,28 @@ end
 function manual_card(id, title, text)
     node("section", "cm-card cm-platform-card", box("cm-platform-head", badge(id), box("", label(title), hint("Manual posting — no credentials stored"))), box("cm-manual-copy", text))
 end
+function youtube_card(d)
+    configured = [box("cm-account", node("span", "cm-account-handle", a["handle"]), brand_pill(a["brand"]),
+        button("Remove", "remove-account"; id=a["id"], kind="ghost")) for a in d["accounts"] if a["platform"] == "youtube"]
+    node("section", "cm-card cm-platform-card",
+        box("cm-platform-head", badge("youtube"), box("", label("YouTube"), hint("Automatic video and Shorts uploads"))),
+        configured,
+        node("ol", "cm-credential-steps",
+            node("li", "", "In Google Cloud, enable YouTube Data API v3."),
+            node("li", "", "Configure Google Auth Platform → Branding and Audience. While in testing, add your Google account as a test user."),
+            node("li", "", "Create an OAuth client of type Web application. Add the callback URL shown below as an authorised redirect URI, then copy its client ID and secret.")),
+        field("Authorised redirect URI", input("youtube_redirect", ""; readonly=true, dataYoutubeRedirect="true")),
+        field("Client ID", input("google_id", "…apps.googleusercontent.com")),
+        field("Client secret", input("google_secret", ""; type="password")),
+        button("Save Google client", "google-client"; kind="primary"),
+        field("Post as", dropdown("youtube_brand", d["youtube_brands"])),
+        button("Connect channel", "connect-youtube"; kind="primary"),
+        isempty(d["youtube_url"]) ? nothing : box("cm-stack",
+            node("a", "", "Sign in with Google"; href=d["youtube_url"], target="_blank", rel="noopener noreferrer"),
+            hint("After Google returns you here, click Finish connection. Your PIN is required to encrypt the channel credentials."),
+            button("Finish connection", "finish-youtube"; kind="primary")),
+        hint("Uploads start as $(d["youtube_privacy"]). Google may restrict unaudited API projects to private uploads."); dataBox="youtube")
+end
 function accounts_view(d)
     header = [label("Publishing accounts"), hint("Connect the platforms you want to publish to. Credentials are encrypted with your Community PIN.")]
     if !d["vault_set"]
@@ -108,7 +130,7 @@ function accounts_view(d)
         network_card(d, "mastodon", "Mastodon", ["Open your instance → Preferences → Development → New application.", "Grant read and write scopes, then copy its access token.", "Enter your full handle including the instance."], "Full Mastodon handle", "makie@fosstodon.org", "Access token"),
         manual_card("linkedin", "LinkedIn", "Approve the draft, copy the text, publish it on LinkedIn, then paste the resulting URL back here."),
         manual_card("discourse", "Discourse", "Approve the forum-topic draft, copy it to Discourse, publish it, then paste the topic URL back here."),
-        manual_card("youtube", "YouTube", "Channel connection is not available yet with the PIN vault. Publish videos manually for now."),
+        youtube_card(d),
         node("section", "cm-card cm-platform-card", box("cm-platform-head", badge("facebook"), badge("instagram"), label("Facebook Page + Instagram")),
              hint("Create a Meta Business app and Page token with pages_manage_posts, pages_read_engagement, instagram_basic and instagram_content_publish permissions. Link a Professional Instagram account to the Page."),
              field("Post as", dropdown("meta_brand", d["meta_brands"])), field("Page access token", input("page_token", ""; type = "password")),
@@ -250,7 +272,7 @@ function dashboard_dom(session, d)
             ps = data["projects"]
             r("top", [length(ps), length(data["accounts"])], () -> box("cm-top", box("", node("h1", "cm-h1", "Community"), box("cm-sub", "$(length(ps)) projects")), spacer(), button("Accounts ($(length(data["accounts"])))", "toggle-accounts"), button("Rescan", "rescan"; kind = "ghost"), button("New project", "toggle-new"; kind = "primary")))
             r("new", ui["showNew"], () -> ui["showNew"] ? new_project_view(data) : DOM.div(; hidden = true))
-            r("accounts", [ui["showAccounts"], data["vault_set"], data["accounts"]], () -> ui["showAccounts"] ? accounts_view(data) : DOM.div(; hidden = true))
+            r("accounts", [ui["showAccounts"], data["vault_set"], data["accounts"], data["youtube_url"]], () -> ui["showAccounts"] ? accounts_view(data) : DOM.div(; hidden = true))
             messages = filter(x -> ui["showHandled"] || x["status"] in ("new", "drafted"), data["inbox"])
             inbox_list = list("inbox-items", messages, x -> x["ref"], x -> message_card(x; inbox = true))
             r("inbox", [isempty(messages), ui["showHandled"]], () -> box("cm-section", box("cm-section-head", label("Inbox"), spacer(), button("Check updates", "check-updates"; kind = "ghost"), button("Handled", "toggle-handled"; kind = "ghost"), button("Draft answers", "inbox_ask_all")), isempty(messages) ? box("cm-empty", "Nothing new. Mentions, forum topics and releases show up here.") : box("cm-replies", inbox_list)))

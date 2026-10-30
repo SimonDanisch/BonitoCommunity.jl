@@ -128,6 +128,7 @@ function with_vault!(f, app, pin::AbstractString)
             return result
         finally
             app.active_secrets[] = nothing
+            empty!(app.sessions)
             wipe_secrets!(secrets)
         end
     end

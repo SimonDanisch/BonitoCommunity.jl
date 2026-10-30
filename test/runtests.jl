@@ -303,23 +303,41 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test q["redirect_uri"] == "http://127.0.0.1:5555" && q["access_type"] == "offline" &&
               q["code_challenge_method"] == "S256" && occursin("youtube.upload", q["scope"])
         @test_throws BT.AppError CM.set_google_client_with_pin!(app, "not-a-client", "x", PIN)
-        @test_throws BT.AppError CM.start_youtube_login!(app, "Makie4Science")          # no client yet
+        @test_throws BT.AppError CM.begin_youtube_login!(app, "Makie4Science", "https://example.org/community-youtube-callback", PIN)          # no client yet
         CM.set_google_client_with_pin!(app, "123.apps.googleusercontent.com", "shh", PIN)
         @test CM.with_vault!(() -> CM.google_client(app), app, PIN) == ("123.apps.googleusercontent.com", "shh")
-        @test_throws BT.AppError CM.with_vault!(() -> CM.start_youtube_login!(app, "Bonito"), app, PIN) # Bonito isn't on YouTube
-        # the login's listener: Google sends the user back with an error
-        login = HTTP.URI(CM.with_vault!(() -> CM.start_youtube_login!(app, "Makie4Science"), app, PIN))
-        lq = HTTP.queryparams(login)
-        r = HTTP.get(lq["redirect_uri"] * "/?state=wrong&code=x"; status_exception = false)
-        @test r.status == 400
-        r = HTTP.get(lq["redirect_uri"] * "/?state=$(lq["state"])&error=access_denied")
-        @test occursin("failed", String(r.body))
-        for _ in 1:50
-            isempty(app.notice[]) || break
-            sleep(0.1)
+        @test_throws BT.AppError CM.begin_youtube_login!(app, "Bonito", "https://example.org/community-youtube-callback", PIN) # Bonito isn't on YouTube
+        redirect = "https://community.example/community-youtube-callback"
+        state, auth = CM.begin_youtube_login!(app, "Makie4Science", redirect, PIN)
+        @test HTTP.queryparams(HTTP.URI(auth))["redirect_uri"] == redirect
+        @test !CM.vault_active(app) && isempty(app.sessions)
+        @test CM.youtube_callback!(app, HTTP.Request("GET", CM.YOUTUBE_CALLBACK * "?state=wrong&code=x")).status == 400
+        @test CM.youtube_callback!(app, HTTP.Request("GET", CM.YOUTUBE_CALLBACK * "?state=$state&code=authcode")).status == 200
+        @test CM.youtube_callback!(app, HTTP.Request("GET", CM.YOUTUBE_CALLBACK * "?state=$state&code=replay")).status == 400
+        @test_throws BT.AppError CM.complete_youtube_login!(app, state, "wrong pin")
+        @test haskey(app.youtube_logins, state)
+        port = CM.free_port()
+        fake = HTTP.serve!("127.0.0.1", port) do req
+            if startswith(req.target, "/token")
+                fields = HTTP.queryparams(HTTP.URI("http://x/?" * String(copy(req.body))))
+                @test fields["code"] == "authcode" && fields["client_secret"] == "shh"
+                @test CM.pkce_challenge(fields["code_verifier"]) == HTTP.queryparams(HTTP.URI(auth))["code_challenge"]
+                return HTTP.Response(200, JSON.json(Dict("access_token"=>"private-access", "refresh_token"=>"private-refresh")))
+            end
+            @test HTTP.header(req, "Authorization") == "Bearer private-access"
+            HTTP.Response(200, JSON.json(Dict("items"=>[Dict("id"=>"test-channel", "snippet"=>Dict("title"=>"Test channel"))])))
         end
-        @test app.notice[] == "Connecting YouTube failed: Google said: access_denied"
-        app.notice[] = ""
+        try
+            account = CM.complete_youtube_login!(app, state, PIN; token_url="http://127.0.0.1:$port/token", channels_url="http://127.0.0.1:$port/channels")
+            @test account.platform == "youtube" && account.brand == "Makie4Science"
+            @test CM.with_vault!(() -> CM.secret(app, account), app, PIN) == "private-refresh"
+            @test !CM.vault_active(app) && isempty(app.sessions)
+            @test !occursin("private-refresh", read(app.secrets_file, String))
+            @test_throws BT.AppError CM.google_access(app, account)
+            @test_throws BT.AppError CM.complete_youtube_login!(app, state, PIN)
+        finally
+            close(fake)
+        end
 
         page = Dict("items" => [Dict("snippet" => Dict(
             "topLevelComment" => Dict("id" => "c1", "snippet" => Dict("authorDisplayName" => "@astro", "textOriginal" => "Gorgeous!",

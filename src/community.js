@@ -2,6 +2,10 @@
 export class DashboardController {
     constructor(root, dialog, pinOpen, actions, feedback) {
         this.root = root; this.dialog = dialog; this.pinOpen = pinOpen; this.actions = actions;
+        const redirect = () => root.querySelectorAll('[data-youtube-redirect]').forEach(n => n.value = location.origin + '/community-youtube-callback');
+        redirect();
+        this.redirectObserver = new MutationObserver(redirect);
+        this.redirectObserver.observe(root, {childList:true, subtree:true});
         this.ui = {showNew: false, showAccounts: false, showHandled: false};
         root.addEventListener('click', e => this.click(e));
         root.addEventListener('change', e => { if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value); });
@@ -129,6 +133,14 @@ export class DashboardController {
                 const token = box.querySelector('[name=page_token]'), value = {brand: box.querySelector('[name=meta_brand]').value, token: token.value.trim()};
                 token.value = ''; return this.pinAction('Connect Facebook and Instagram', 'add_meta', null, value);
             }
+            case 'google-client': {
+                const secret = box.querySelector('[name=google_secret]');
+                const value = {client_id:box.querySelector('[name=google_id]').value.trim(), client_secret:secret.value.trim()};
+                secret.value = ''; return this.pinAction('Encrypt Google client credentials', 'google_client', null, value);
+            }
+            case 'connect-youtube': return this.pinAction('Connect YouTube channel', 'connect_youtube', null,
+                {brand:box.querySelector('[name=youtube_brand]').value, redirect:location.origin+'/community-youtube-callback'});
+            case 'finish-youtube': return this.pinAction('Finish connecting YouTube', 'finish_youtube');
             case 'send': case 'inbox-send': {
                 const text = box.querySelector('[name=answer]').value.trim();
                 if (text) return this.pinAction('Send this answer?', a === 'send' ? 'send' : 'inbox_send', id, {text}); return;

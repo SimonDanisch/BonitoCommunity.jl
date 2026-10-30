@@ -27,8 +27,11 @@ A BonitoAgents app for the community work around Makie, Bonito and Makie4Science
 ## Accounts (overview → Accounts)
 
 - Bluesky: handle + app password. Mastodon: handle + access token (read, write).
-- YouTube channel connection is currently disabled pending its PIN-safe OAuth
-  continuation. Publish videos manually for now.
+- YouTube: enable YouTube Data API v3 and create a **Web application** OAuth
+  client. Register the callback URL shown in the YouTube card. Save the client
+  ID and secret with your PIN, choose a brand and connect its channel. Sign in
+  with Google, then return to the dashboard and finish with your PIN. Tokens
+  are encrypted; uploads require another explicit PIN-authorised publish action.
 - Facebook + Instagram: a long-lived Page access token; it finds the linked Instagram account.
 
 Passwords and tokens are encrypted in `<state_dir>/apps/community/secrets.enc`
@@ -42,11 +45,10 @@ forums and repositories, YouTube privacy) are in `settings.json` next to it.
 
 ## Install as a server plugin
 
-The shared UI currently requires BonitoAgents branch `sd/app-ui-components`
-([PR #28](https://github.com/SimonDanisch/BonitoAgents.jl/pull/28)). Community
+The shared UI requires current BonitoAgents `main` (including merged
+[PR #28](https://github.com/SimonDanisch/BonitoAgents.jl/pull/28)). Community
 uses its public `AppButton`, `AppCard`, `AppModal` and `AppUIStyles`; all share
-the server's BonitoWidgets theme. Switch the source pins back to `main` once
-that PR is merged.
+the server's BonitoWidgets theme.
 
 Install BonitoCommunity into the same Julia environment from which the normal
 BonitoAgents server runs:

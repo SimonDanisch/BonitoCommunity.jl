@@ -32,7 +32,8 @@ struct Dashboard{V}
 end
 Dashboard(app, view, project) = Dashboard(app, view, project,
     Observable(Dict{String,Any}("filter" => "all", "showNew" => false, "showAccounts" => false,
-                               "showHandled" => false, "marking" => nothing, "changing" => nothing)),
+                               "showHandled" => false, "marking" => nothing, "changing" => nothing,
+                               "youtube_state" => "", "youtube_url" => "")),
     Observable{Any}(nothing), Observable(""), Observable(""), Observable(false))
 
 function Base.close(d::Dashboard)
@@ -43,6 +44,7 @@ const CommunityLib = Bonito.ES6Module(joinpath(@__DIR__, "community.js"))
 
 function Bonito.jsrender(session::Bonito.Session, d::Dashboard)
     on(session, d.actions) do a
+        d.actions.val = nothing # do not retain submitted PINs or credentials
         a isa AbstractVector && length(a) == 3 || error("invalid Community action message")
         if a[1] == "view"
             all(k -> haskey(d.ui[], k), keys(a[3])) || error("unknown Community view state")
@@ -149,9 +151,7 @@ function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
         base["inbox"] = [inbox_data(x) for x in vcat(open, first(handled, 30))]
         base["watches"] = [w.url for w in app.settings.watches]
         base["vault_set"] = vault_exists(app)
-        # Reading the client itself would unlock the vault; connection setup is
-        # deliberately unavailable until its PIN-safe OAuth continuation exists.
-        base["google_client"] = false
+        base["youtube_url"] = d.ui[]["youtube_url"]
         base["youtube_brands"] = [b.name for b in app.settings.brands if "youtube" in b.platforms]
         base["meta_brands"] = [b.name for b in app.settings.brands if "facebook" in b.platforms || "instagram" in b.platforms]
         base["youtube_privacy"] = app.settings.youtube_privacy
@@ -179,7 +179,7 @@ const PANE_ACTIONS = ("new", "rescan", "start", "open", "overview", "add_account
                       "title", "brands", "brief", "link", "state", "approve", "approve_all", "publish_all", "unapprove", "changes",
                       "edit", "remove", "publish", "mark", "retry", "answer", "ask_answer", "ask_answers",
                       "send", "ignore", "inbox_answer", "inbox_send", "inbox_done", "inbox_ignore", "inbox_reopen",
-                      "inbox_ask", "inbox_ask_all", "inbox_project", "set_pin", "check_updates", "google_client", "connect_youtube", "add_meta")
+                      "inbox_ask", "inbox_ask_all", "inbox_project", "set_pin", "check_updates", "google_client", "connect_youtube", "finish_youtube", "add_meta")
 
 # A click on the dashboard. What can't be done (an account whose password is
 # wrong, a draft another tab just removed) is said in this tab, not more.
@@ -225,10 +225,19 @@ pane_action!(d::Dashboard, ::Val{:check_updates}, ::Nothing, pin::AbstractString
 pane_action!(d::Dashboard, ::Val{:add_account}, ::Nothing, v::AbstractDict) =
     add_account_with_pin!(d.app, v["platform"], v["brand"], v["handle"], v["server"], v["role"], v["secret"], v["pin"])
 pane_action!(d::Dashboard, ::Val{:remove_account}, id::AbstractString, pin::AbstractString) = remove_account_with_pin!(d.app, id, pin)
-pane_action!(d::Dashboard, ::Val{:google_client}, ::Nothing, v::AbstractDict) =
+function pane_action!(d::Dashboard, ::Val{:google_client}, ::Nothing, v::AbstractDict)
     set_google_client_with_pin!(d.app, v["client_id"], v["client_secret"], v["pin"])
-pane_action!(d::Dashboard, ::Val{:connect_youtube}, ::Nothing, brand::AbstractString) =
-    throw(AppError("YouTube connection is disabled while the credential vault is locked between requests"))
+    d.feedback[] = "Google client saved in the encrypted vault. You can connect a channel now."
+end
+function pane_action!(d::Dashboard, ::Val{:connect_youtube}, ::Nothing, v::AbstractDict)
+    state, url = begin_youtube_login!(d.app, v["brand"], v["redirect"], v["pin"])
+    d.ui[] = merge(d.ui[], Dict("youtube_state"=>state, "youtube_url"=>url))
+end
+function pane_action!(d::Dashboard, ::Val{:finish_youtube}, ::Nothing, pin::AbstractString)
+    complete_youtube_login!(d.app, d.ui[]["youtube_state"], pin)
+    d.ui[] = merge(d.ui[], Dict("youtube_state"=>"", "youtube_url"=>""))
+    d.feedback[] = "YouTube channel connected."
+end
 pane_action!(d::Dashboard, ::Val{:add_meta}, ::Nothing, v::AbstractDict) = add_meta_accounts_with_pin!(d.app, v["brand"], v["token"], v["pin"])
 
 pane_action!(d::Dashboard, ::Val{:brands}, id::AbstractString, brands::AbstractVector) =

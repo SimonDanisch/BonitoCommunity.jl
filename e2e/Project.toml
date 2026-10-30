@@ -22,13 +22,13 @@ WorkerLink = "03840273-e5e6-4e74-9050-e95881fcd827"
 
 [sources]
 Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
-BonitoAgents = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "BonitoAgents"}
+BonitoAgents = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoAgents"}
 BonitoCommunity = {path = ".."}
-BonitoMCP = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "BonitoMCP"}
-BonitoWorker = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "BonitoWorker"}
+BonitoMCP = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoMCP"}
+BonitoWorker = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoWorker"}
 ElectronCall = {rev = "sd/testsuite", url = "https://github.com/IanButterworth/ElectronCall.jl.git"}
-MockACP = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "BonitoAgents/test/MockACP"}
-AgentClientProtocol = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "AgentClientProtocol"}
-AgentProviders = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "AgentProviders"}
-RemoteSync = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "RemoteSync"}
-WorkerLink = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "WorkerLink"}
+MockACP = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoAgents/test/MockACP"}
+AgentClientProtocol = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "AgentClientProtocol"}
+AgentProviders = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "AgentProviders"}
+RemoteSync = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "RemoteSync"}
+WorkerLink = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "WorkerLink"}

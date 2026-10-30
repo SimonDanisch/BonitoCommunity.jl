@@ -44,6 +44,8 @@ mutable struct CommunityApp <: AgentApp
     const state::Observable{CommunityFile}
     # Logged-in Bluesky accounts, by account id.
     const sessions::Dict{String,Session}
+    # OAuth continuations contain no PIN, client secret or access token.
+    const youtube_logins::Dict{String,Any}
     # When each published draft was last checked for replies (replies.jl).
     const polled::Dict{Int,DateTime}
     # When each inbox source (an account's mentions, a watched forum) was last checked (inbox.jl).
@@ -71,7 +73,7 @@ function CommunityApp(ctx::AppContext; poll::Bool = true)
     saved = something(load_json_tolerant(file, "community.json", CommunityFile), CommunityFile())
     next = max(saved.next_draft, maximum((d.id for d in saved.drafts); init = 0) + 1)
     app = CommunityApp(ReentrantLock(), ctx, file, joinpath(ctx.dir, "secrets.enc"), Ref{Union{Nothing,Dict{String,String}}}(nothing), settings,
-                       Observable(with(saved; next_draft = next)), Dict{String,Session}(),
+                       Observable(with(saved; next_draft = next)), Dict{String,Session}(), Dict{String,Any}(),
                        Dict{Int,DateTime}(), Dict{String,DateTime}(), Observable(""), nothing)
     scan_projects!(app)
     poll && start_polling!(app)

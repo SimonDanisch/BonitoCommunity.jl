@@ -16,7 +16,7 @@ libsodium_jll = "a9144af2-ca23-56d9-984f-0d03f7b5ccf8"
 
 [sources]
 Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
-BonitoAgents = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "sd/app-ui-components", subdir = "BonitoAgents"}
+BonitoAgents = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoAgents"}
 
 [compat]
 libsodium_jll = "1.0.21"
