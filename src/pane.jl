@@ -80,16 +80,30 @@ when(t::DateTime) = relative_time_label(datetime2unix(t))
 # The text as it will be published, the links filled in that the project has.
 shown_text(d::Draft, p::Project) = fill_known_links(d.text, p)
 
-function draft_data(app::CommunityApp, d::Draft, p::Project)
+function account_label(app::CommunityApp, id::AbstractString)
+    a = findfirst(a -> a.id == id, app.state[].accounts)
+    a === nothing && return "unknown account"
+    account = app.state[].accounts[a]
+    return "@$(account.handle)" * (isempty(account.brand) ? "" : " · $(account.brand)")
+end
+
+function draft_data(dashboard::Dashboard, d::Draft, p::Project)
+    app = dashboard.app
     pl = find_platform(d.platform)
     account = findfirst(a -> a.role == "post" && a.brand == d.brand && a.platform == d.platform, app.state[].accounts)
     Dict{String,Any}(
         "id" => d.id, "brand" => d.brand, "platform" => platform_id(pl), "kind" => d.kind,
         "title" => d.title, "text" => d.text, "final_text" => shown_text(d, p), "media" => d.media,
+        "media_files" => [file_data(dashboard, p, f) for f in d.media],
         "status" => d.status, "note" => d.note, "chars" => text_length(pl, d.text), "max" => max_text(pl),
         "publishes" => publishes(pl), "has_account" => account !== nothing,
-        "needs_links" => missing_links(d.text, p),
-        "posts" => [Dict("url" => x.url, "kind" => x.kind, "account" => x.account) for x in d.posts],
+        "account_label" => account === nothing ? "" : account_label(app, app.state[].accounts[account].id),
+        "reshare_from" => d.reshare_from,
+        "reshare_options" => [Dict("id" => x.id, "label" => "#$(x.id) · $(x.brand) · $(account_label(app, posting_account(app, x.brand, x.platform).id))")
+                              for x in project_drafts(app.state[], d.project) if x.id != d.id && x.platform == d.platform && x.reshare_from == 0 &&
+                                  findfirst(a -> a.role == "post" && a.brand == x.brand && a.platform == x.platform, app.state[].accounts) !== nothing],
+        "needs_links" => d.reshare_from == 0 ? missing_links(d.text, p) : String[],
+        "posts" => [Dict("url" => x.url, "kind" => x.kind, "account" => x.account, "account_label" => account_label(app, x.account)) for x in d.posts],
         "stats" => isempty(d.posts) ? Dict{String,Int}() : d.posts[1].stats,
         "updated" => when(d.updated))
 end
@@ -172,7 +186,7 @@ function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
     base["mode"] = "project"
     base["project"] = merge(project_card(d, s, p), Dict{String,Any}(
         "links" => p.links, "files" => [file_data(d, p, f) for f in files],
-        "drafts" => [draft_data(app, x, p) for x in project_drafts(s, p.id)],
+        "drafts" => [draft_data(d, x, p) for x in project_drafts(s, p.id)],
         "replies" => [reply_data(r) for r in sort(project_replies(s, p.id); by = r -> r.created, rev = true)]))
     return base
 end
@@ -181,7 +195,7 @@ end
 
 const PANE_ACTIONS = ("save_brand", "delete_brand", "new", "rescan", "start", "open", "overview", "add_account", "remove_account",
                       "title", "brands", "brief", "link", "state", "approve", "approve_all", "publish_all", "unapprove", "changes",
-                      "edit", "remove", "publish", "mark", "retry", "answer", "ask_answer", "ask_answers",
+                      "edit", "remove", "reshare", "publish", "mark", "retry", "answer", "ask_answer", "ask_answers",
                       "send", "ignore", "inbox_answer", "inbox_send", "inbox_done", "inbox_ignore", "inbox_reopen",
                       "inbox_ask", "inbox_ask_all", "inbox_project", "set_pin", "check_updates", "google_client", "connect_youtube", "finish_youtube", "add_meta")
 
@@ -265,6 +279,7 @@ pane_action!(d::Dashboard, ::Val{:unapprove}, id::Integer, ::Nothing) = review_d
 pane_action!(d::Dashboard, ::Val{:retry}, id::Integer, ::Nothing) = review_draft!(d.app, Int(id), "approved")
 pane_action!(d::Dashboard, ::Val{:edit}, id::Integer, text::AbstractString) = edit_draft_text!(d.app, Int(id), text)
 pane_action!(d::Dashboard, ::Val{:remove}, id::Integer, ::Nothing) = remove_draft!(d.app, Int(id))
+pane_action!(d::Dashboard, ::Val{:reshare}, id::Integer, source::Integer) = set_draft_reshare!(d.app, Int(id), Int(source))
 pane_action!(d::Dashboard, ::Val{:publish}, id::Integer, pin::AbstractString) = publish_with_pin!(d.app, Int(id), pin)
 pane_action!(d::Dashboard, ::Val{:publish_all}, id::AbstractString, pin::AbstractString) =
     publish_approved_with_pin!(d.app, id, pin)
@@ -464,6 +479,9 @@ const CommunityStyles = Styles(
         "line-height" => "1.5", "outline" => "none", "border-radius" => "6px", "max-height" => "260px", "overflow-y" => "auto"),
     CSS(".cm-draft-text[contenteditable='plaintext-only']", "box-shadow" => "0 0 0 2px var(--bw-accent)", "padding" => "4px",
         "max-height" => "none"),
+    CSS(".cm-draft-images", "display" => "grid", "grid-template-columns" => "repeat(auto-fit, minmax(92px, 1fr))", "gap" => "6px"),
+    CSS(".cm-draft-image", "width" => "100%", "aspect-ratio" => "1.5", "object-fit" => "cover", "display" => "block",
+        "border-radius" => "8px", "border" => "1px solid var(--bw-border)"),
     CSS(".cm-link-chip", "background" => "color-mix(in srgb, var(--bw-accent) 14%, transparent)", "color" => "var(--bw-accent)",
         "border-radius" => "4px", "padding" => "0 4px", "font-size" => "var(--bw-font-size-ui)"),
     CSS(".cm-meter", "height" => "3px", "border-radius" => "2px", "background" => "var(--bw-bg-subtle)", "overflow" => "hidden"),

@@ -95,7 +95,9 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test CM.check_draft_text(CM.YouTube(), "A title", "desc") === nothing
         @test CM.check_draft_text(CM.Discourse(), "BonitoAgents is here", "A Markdown release announcement.") === nothing
         @test_throws BT.AppError CM.check_draft_text(CM.Discourse(), "x"^121, "body")
+        @test CM.check_draft_media(CM.Bluesky(), ["announcement.png"]) === nothing
         @test_throws BT.AppError CM.check_draft_media(CM.Bluesky(), ["a.mp4"])
+        @test_throws BT.AppError CM.check_draft_media(CM.Mastodon(), ["a.png", "b.jpg", "c.webp", "d.gif", "e.png"])
         @test CM.account_server(CM.Mastodon(), "makie@fosstodon.org", "") == "https://fosstodon.org"
         @test CM.account_server(CM.Bluesky(), "makie.org", "") == "https://bsky.social"
     end
@@ -163,7 +165,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
                                                         platform = "tiktok", kind = "video", text = "x"))
         @test occursin("allows 300 characters", call(server, chat, "project_draft"; brand = "Makie",
                                                       platform = "bluesky", kind = "post", text = "x"^400))
-        @test occursin("carry no media", call(server, chat, "project_draft"; brand = "Makie", platform = "bluesky",
+        @test occursin("only attach images", call(server, chat, "project_draft"; brand = "Makie", platform = "bluesky",
                                                kind = "post", text = "x", media = "render.mp4"))
         @test occursin("not in the project folder", call(server, chat, "project_draft"; brand = "Makie4Science",
                                                          platform = "tiktok", kind = "video", text = "x", media = "nope.mp4"))
@@ -206,9 +208,9 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         d2 = CM.find_draft(app, 2)
         @test d2.status == "published"
         @test NET.posted == [("mastodon:m4s@fosstodon.org", "A black hole, rendered with Makie: https://youtu.be/bh #julialang")]
-        # the Makie account (a brand of the project) and the personal one repost; Bonito's doesn't
-        @test Set(first.(NET.reposted)) == Set(["mastodon:makie@fosstodon.org", "mastodon:sim@julialang.social"])
-        @test [x.kind for x in d2.posts] == ["original", "repost", "repost"]
+        # Only an explicitly amplifying personal account reposts automatically.
+        @test first.(NET.reposted) == ["mastodon:sim@julialang.social"]
+        @test [x.kind for x in d2.posts] == ["original", "repost"]
         @test CM.find_project(app, p.id).state == "publishing"
         @test_throws BT.AppError CM.edit_draft_text!(app, 2, "changed")    # out is out
         # posted by hand: the link, and the project moves on once everything is out
@@ -225,6 +227,17 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         sent = CM.publish_approved_with_pin!(app, p.id, PIN)
         @test length(sent) == 1 && only(sent).status == "published"
         @test CM.find_draft(app, d3.id).status == "published"
+
+        # A brand account may deliberately boost the original, rather than
+        # silently creating another post.
+        d4 = CM.save_draft!(app, p.id; brand = "Makie", platform = "mastodon", kind = "post",
+                             title = "", text = "A second release post", media = String[])
+        CM.set_draft_reshare!(app, d4.id, 2)
+        @test CM.find_draft(app, d4.id).reshare_from == 2 && CM.find_draft(app, d4.id).status == "draft"
+        CM.review_draft!(app, d4.id, "approved")
+        CM.publish_with_pin!(app, d4.id, PIN)
+        @test only(CM.find_draft(app, d4.id).posts).kind == "repost"
+        @test last(NET.reposted) == ("mastodon:makie@fosstodon.org", "101")
     end
 
     @testset "replies: checked, answered, not our own" begin
@@ -235,8 +248,8 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         CM.with_vault!(() -> CM.poll_replies!(app), app, PIN)
         rs = CM.project_replies(app.state[], p.id)
         @test CM.find_draft(app, 2).posts[1].stats == Dict("likes" => 12, "reposts" => 3, "replies" => 1)
-        @test length(CM.find_draft(app, 2).posts) == 3                     # the reposts kept
-        @test CM.stats_total(CM.project_drafts(app.state[], p.id))["likes"] == 24
+        @test length(CM.find_draft(app, 2).posts) == 2                     # the personal repost is kept
+        @test CM.stats_total(CM.project_drafts(app.state[], p.id))["likes"] == 36
         @test [r.ref for r in rs] == ["301"] && rs[1].status == "new" && rs[1].account == "mastodon:m4s@fosstodon.org"
         CM.with_vault!(() -> CM.poll_replies!(app), app, PIN)              # not due again yet, and nothing twice
         @test length(app.state[].replies) == 1
@@ -438,6 +451,33 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test_throws BT.AppError CM.verify_account(CM.Facebook(), app.state[].accounts[1], "x")
     end
 
+    @testset "Bluesky and Mastodon: native post images" begin
+        image = joinpath(projects, p.id, "announcement.png")
+        write(image, UInt8[0x89, 0x50, 0x4e, 0x47])
+        d = CM.Draft(999, p.id, "Makie4Science", "mastodon", "post", "", "Release image", ["announcement.png"],
+                     "draft", "", CM.Post[], 0, now(UTC))
+
+        port = CM.free_port()
+        uploads = Any[]
+        server = HTTP.serve!("127.0.0.1", port) do req
+            push!(uploads, (req.target, HTTP.header(req, "Content-Type"), copy(req.body)))
+            HTTP.Response(200, JSON.json(Dict("id" => "media-1", "blob" => Dict("ref" => Dict("\$link" => "blob-1")))))
+        end
+        try
+            bsky = CM.Account("bluesky:science", "bluesky", "Makie4Science", "science.makie.org", "http://127.0.0.1:$port", "post")
+            embed = CM.bsky_image_embed(app, bsky, CM.Session("token", "did:test", now(UTC)), d)
+            @test embed["\$type"] == "app.bsky.embed.images" && only(embed["images"])["alt"] == "Image for Black hole render"
+            mastodon = CM.Account("mastodon:local", "mastodon", "Makie4Science", "science", "http://127.0.0.1:$port", "post")
+            CM.with_vault!(() -> CM.store_secret!(app, mastodon.id, "token"), app, PIN)
+            @test CM.with_vault!(() -> CM.mastodon_media(app, mastodon, d), app, PIN) == ["media-1"]
+        finally
+            close(server)
+        end
+        @test length(uploads) == 2
+        @test uploads[1][1] == "/xrpc/com.atproto.repo.uploadBlob" && uploads[1][2] == "image/png"
+        @test uploads[2][1] == "/api/v2/media" && occursin("multipart/form-data", uploads[2][2]) && occursin("announcement.png", String(uploads[2][3]))
+    end
+
     @testset "state survives a restart" begin
         @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "Renamed", ["youtube"], "")
         @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "", String[], ""; remove=true)
@@ -450,7 +490,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         for f in (:projects, :drafts, :accounts, :replies, :inbox)
             @test all(splat(same), zip(getfield(again.state[], f), getfield(app.state[], f)))
         end
-        @test again.state[].next_draft == 4
+        @test again.state[].next_draft == 5
         @test !CM.vault_active(again)
         @test_throws BT.AppError CM.secret(again, CM.find_account(again, "mastodon:m4s@fosstodon.org"))
     end

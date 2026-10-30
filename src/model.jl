@@ -76,6 +76,7 @@ JSON.@defaults struct Draft
     status::String                # one of DRAFT_STATES
     note::String                  # what the user asked to change, or why publishing failed
     posts::Vector{Post} = Post[]  # once published: the original first, then reposts
+    reshare_from::Int = 0          # another draft in this project; 0 means publish this as an original
     updated::DateTime = now(UTC)
 end
 
@@ -189,5 +190,28 @@ end
 
 const VIDEO_EXTS = (".mp4", ".webm", ".mov", ".m4v")
 const IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
+const POST_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 is_video(file::AbstractString) = lowercase(splitext(file)[2]) in VIDEO_EXTS
 is_image(file::AbstractString) = lowercase(splitext(file)[2]) in IMAGE_EXTS
+is_post_image(file::AbstractString) = lowercase(splitext(file)[2]) in POST_IMAGE_EXTS
+
+"The image formats the Bluesky and Mastodon upload APIs accept from Community."
+function image_content_type(file::AbstractString)
+    ext = lowercase(splitext(file)[2])
+    ext == ".png" && return "image/png"
+    ext in (".jpg", ".jpeg") && return "image/jpeg"
+    ext == ".gif" && return "image/gif"
+    ext == ".webp" && return "image/webp"
+    throw(AppError("$file is not a supported post image (use PNG, JPEG, GIF or WebP)"))
+end
+
+"The persistent server paths of a draft's native images."
+function draft_images(app, d::Draft)
+    p = find_project(app, d.project)
+    files = [joinpath(project_folder(projects_dir(app), p), media) for media in d.media]
+    for file in files
+        isfile(file) || throw(AppError("$(basename(file)) is no longer in the project folder"))
+        image_content_type(file)
+    end
+    return files
+end

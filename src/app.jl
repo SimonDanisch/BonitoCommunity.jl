@@ -250,7 +250,7 @@ function save_draft!(app::CommunityApp, project_id::AbstractString; draft_id::In
         next = s.next_draft
         if draft_id == 0
             d = Draft(next, p.id, b.name, platform_id(pl), strip(kind), strip(title), strip(text), media,
-                      "draft", "", Post[], now(UTC))
+                      "draft", "", Post[], 0, now(UTC))
             push!(drafts, d)
             next += 1
         else
@@ -277,6 +277,20 @@ function set_draft!(app::CommunityApp, id::Int; kw...)
         with(s; drafts)
     end
     return d
+end
+
+"Choose whether a brand's draft is its own post or a reshare of another original draft."
+function set_draft_reshare!(app::CommunityApp, id::Int, source_id::Int)
+    d = find_draft(app, id)
+    is_out(d) && throw(AppError("draft #$id is already $(d.status)"))
+    if source_id == 0
+        return set_draft!(app, id; reshare_from = 0, status = "draft")
+    end
+    source_id == id && throw(AppError("a draft cannot reshare itself"))
+    source = find_draft(app, source_id)
+    source.project == d.project && source.platform == d.platform && source.reshare_from == 0 ||
+        throw(AppError("choose an original draft from this project and platform"))
+    return set_draft!(app, id; reshare_from = source.id, status = "draft")
 end
 
 # A draft on its way out or out: no more edits or verdicts.
@@ -376,7 +390,7 @@ function posting_account(app::CommunityApp, brand::AbstractString, platform::Abs
     return app.state[].accounts[i]
 end
 
-"The accounts that repost `origin`'s post of project `p`: every amplifying one on that platform, and those posting for the project's other brands."
+"Explicitly configured personal accounts that repost `origin`'s post. Brand accounts reshare only when selected on that draft."
 amplifying_accounts(app::CommunityApp, origin::Account, p::Project) =
-    filter(a -> a.platform == origin.platform && a.id != origin.id && (a.role == "amplify" || a.brand in p.brands),
+    filter(a -> a.platform == origin.platform && a.id != origin.id && a.role == "amplify",
            app.state[].accounts)

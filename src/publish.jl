@@ -16,13 +16,21 @@ function publish_draft!(app::CommunityApp, id::Int)
     publishes(pl) || throw(AppError("$(platform_name(pl)) is posted by hand: post it there, then paste the link"))
     p = find_project(app, d.project)
     origin = posting_account(app, d.brand, d.platform)
-    text = fill_links(d.text, p)
-    original = publish(pl, app, origin, d, text)
+    original = if d.reshare_from == 0
+        text = fill_links(d.text, p)
+        publish(pl, app, origin, d, text)
+    else
+        source = find_draft(app, d.reshare_from)
+        source.project == d.project && source.platform == d.platform && source.reshare_from == 0 ||
+            throw(AppError("draft #$id must reshare an original draft on the same platform"))
+        source.status == "published" || throw(AppError("publish original draft #$(source.id) before resharing it"))
+        repost(pl, app, origin, first(source.posts))
+    end
     d = set_draft!(app, id; status = "published", note = "", posts = [original])
     # the project's video: what its link posts point to
     d.platform == "youtube" && d.kind == "video" && !haskey(p.links, "youtube") && set_link!(app, p.id, "youtube", original.url)
     failed = String[]
-    for a in (reposts(pl) ? amplifying_accounts(app, origin, p) : Account[])
+    for a in (d.reshare_from == 0 && reposts(pl) ? amplifying_accounts(app, origin, p) : Account[])
         r = attempt(() -> repost(pl, app, a, original), "repost of draft #$id by $(a.handle)")
         r isa Post ? (d = set_draft!(app, id; posts = vcat(find_draft(app, id).posts, r))) : push!(failed, "$(a.handle): $r")
     end
@@ -112,14 +120,21 @@ function publishable_drafts(app::CommunityApp, project_id::AbstractString)
     drafts = filter(d -> d.project == project_id && d.status == "approved" && publishes(find_platform(d.platform)), app.state[].drafts)
     isempty(drafts) && throw(AppError("there are no approved automatic posts for this release"))
     # Link posts can depend on the video's URL, which its upload supplies.
-    sort!(drafts; by = d -> d.platform == "youtube" ? 0 : 1)
+    sort!(drafts; by = d -> (d.platform == "youtube" ? 0 : 1, d.reshare_from == 0 ? 0 : 1))
     has_youtube = any(d -> d.platform == "youtube" && d.kind == "video", drafts)
     for d in drafts
         p = find_project(app, d.project)
-        missing = missing_links(d.text, p)
+        missing = d.reshare_from == 0 ? missing_links(d.text, p) : String[]
         filter!(x -> !(x == "youtube" && has_youtube), missing)
         isempty(missing) || throw(AppError("draft #$(d.id) needs the project's $(join(missing, " and ")) link before this release can be sent"))
         posting_account(app, d.brand, d.platform)
+        if d.reshare_from != 0
+            source = find_draft(app, d.reshare_from)
+            source.project == d.project && source.platform == d.platform && source.reshare_from == 0 ||
+                throw(AppError("draft #$(d.id) must reshare an original draft on the same platform"))
+            source.status == "published" || any(x -> x.id == source.id, drafts) ||
+                throw(AppError("draft #$(d.id) needs original draft #$(source.id) approved first"))
+        end
     end
     return drafts
 end

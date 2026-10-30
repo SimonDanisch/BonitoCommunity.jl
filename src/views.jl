@@ -234,18 +234,29 @@ end
 function draft_card(x, ui)
     id = x["id"]; state = x["status"]
     out = state in ("publishing", "published")
+    images = [node("img", "cm-draft-image"; src=f["url"], alt=f["name"], loading="lazy") for f in x["media_files"] if f["image"]]
+    delivery = if !isempty(x["account_label"])
+        x["reshare_from"] == 0 ? hint("Posts as $(x["account_label"])") : hint("Reshares original draft #$(x["reshare_from"]) as $(x["account_label"])")
+    end
     body = box("cm-draft-body", isempty(x["title"]) ? nothing : box("cm-draft-title", x["title"]),
+        delivery,
         box("cm-draft-text", draft_text(x["text"])...; dataRaw = x["text"], dataEditable = out ? nothing : true),
         node("progress", "cm-meter"; value = x["chars"], max = x["max"], title = "$(x["chars"]) of $(x["max"]) characters"),
+        isempty(images) ? nothing : box("cm-draft-images", images...),
         box("cm-files", [node("span", "cm-file", f) for f in x["media"]]...),
         isempty(x["note"]) ? nothing : box("cm-callout", state == "changes" ? "Changes asked: " * x["note"] : x["note"]),
-        box("cm-posted", [link("↗ " * p["url"], p["url"]) for p in x["posts"]]...), stats(x["stats"]))
+        box("cm-posted", [link("↗ " * (p["kind"] == "original" ? "Posted" : "Reshared") * " by " * p["account_label"], p["url"]) for p in x["posts"]]...), stats(x["stats"]))
     foot = if ui["changing"] == id || ui["marking"] == id
         changes = ui["changing"] == id
         box("cm-row", input(changes ? "note" : "url", changes ? "What should change?" : "Link to the post"),
             button(changes ? "Send" : "Mark published", changes ? "changes" : "mark"; id, kind = "primary"), button("Cancel", "cancel"; kind = "ghost"); dataBox = (changes ? "changes-" : "mark-") * string(id))
     elseif state in ("draft", "changes")
-        box("cm-row", button("Approve", "approve"; num = id, kind = "primary"), button("Request changes", "changes-open"; id), button("Edit", "edit"; id, kind = "ghost"), spacer(), button("Remove", "remove"; num = id, kind = "ghost"))
+        reshare = if x["platform"] in ("bluesky", "mastodon") && !isempty(x["reshare_options"])
+            choices = [node("option", "", "Post own copy"; value="0", selected=x["reshare_from"] == 0),
+                       [node("option", "", "Reshare " * source["label"]; value=string(source["id"]), selected=x["reshare_from"] == source["id"]) for source in x["reshare_options"]]...]
+            box("cm-row", node("select", "cm-select", choices...; name="reshare_from"), button("Save delivery", "reshare"; num=id, kind="ghost"))
+        end
+        box("cm-section", reshare, box("cm-row", button("Approve", "approve"; num = id, kind = "primary"), button("Request changes", "changes-open"; id), button("Edit", "edit"; id, kind = "ghost"), spacer(), button("Remove", "remove"; num = id, kind = "ghost")))
     elseif state == "approved"
         automatic = if x["publishes"]
             why = !isempty(x["needs_links"]) ? "Set the project's $(join(x["needs_links"], " and ")) link first" : !x["has_account"] ? "Add a $(x["platform"]) account for $(x["brand"]) in the overview" : ""

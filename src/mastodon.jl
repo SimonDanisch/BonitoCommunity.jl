@@ -11,9 +11,27 @@ end
 verify_account(::Mastodon, a::Account, secret::AbstractString) =
     (api("GET", "$(a.server)/api/v1/accounts/verify_credentials"; token = secret); nothing)
 
-function publish(::Mastodon, app::CommunityApp, a::Account, ::Draft, text::AbstractString)
+function mastodon_media(app::CommunityApp, a::Account, d::Draft)
+    p = find_project(app, d.project)
+    ids = String[]
+    for file in draft_images(app, d)
+        form = HTTP.Form(["file" => HTTP.Multipart(basename(file), IOBuffer(read(file)), image_content_type(file)),
+                          "description" => (isempty(d.title) ? "Image for $(p.title)" : d.title)])
+        r = HTTP.request("POST", "$(a.server)/api/v2/media",
+                         ["Authorization" => "Bearer $(secret(app, a))", "Content-Type" => HTTP.content_type(form)], read(form);
+                         status_exception=false, retry=false, connect_timeout=15, request_timeout=120)
+        r.status < 300 || throw(AppError("POST $(a.server)/api/v2/media failed ($(r.status)): $(api_error_text(r.body))"))
+        push!(ids, string(JSON.parse(String(r.body))["id"]))
+    end
+    return ids
+end
+
+function publish(::Mastodon, app::CommunityApp, a::Account, d::Draft, text::AbstractString)
+    media_ids = mastodon_media(app, a, d)
+    payload = Dict{String,Any}("status" => text, "visibility" => "public", "language" => "en")
+    isempty(media_ids) || (payload["media_ids"] = media_ids)
     r = api("POST", "$(a.server)/api/v1/statuses"; token = secret(app, a),
-            json = Dict("status" => text, "visibility" => "public", "language" => "en"),
+            json = payload,
             headers = ["Idempotency-Key" => string(hash((a.id, text)))])
     return Post(a.id, "original", string(r["id"]), "", string(r["url"]), now(UTC))
 end

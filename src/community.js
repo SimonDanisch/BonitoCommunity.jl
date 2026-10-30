@@ -126,6 +126,7 @@ export class DashboardController {
             case 'remove-account': return this.pinAction('Remove this account?', 'remove_account', id);
             case 'publish': return this.pinAction('Publish this approved post?', 'publish', num);
             case 'publish-all': return this.pinAction('Publish all approved automatic posts?', 'publish_all', id);
+            case 'reshare': return this.send('reshare', num, Number(box.querySelector('[name=reshare_from]').value));
             case 'add-account': {
                 const role = b.dataset.role, form = role === 'amplify' ? b.closest('details').querySelector('[data-account-form=amplify]') : box.querySelector('[data-account-form=post]');
                 const v = name => form.querySelector(`[name=${name}]`)?.value.trim() || '';

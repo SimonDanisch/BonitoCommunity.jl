@@ -49,10 +49,13 @@ publishes(::YouTube) = true
 reposts(::Platform) = true
 reposts(::YouTube) = false
 
-"Whether a draft there carries media files; Bluesky and Mastodon posts link to the video instead."
+"Whether a draft there carries media files."
 carries_media(::Platform) = true
-carries_media(::Bluesky) = false
-carries_media(::Mastodon) = false
+
+"The native-image platforms have deliberately small, predictable limits."
+max_images(::Platform) = typemax(Int)
+max_images(::Bluesky) = 4
+max_images(::Mastodon) = 4
 
 # Drafts link to the project's video and blog post with these placeholders; they
 # are filled in from the project's links when it is published, and counted as a
@@ -73,10 +76,10 @@ role(::TikTok) = "the video natively, vertical if possible; over 1 min so it cou
                  "It arrives as a draft in the TikTok app."
 role(::Instagram) = "a vertical Reel of at most 3 min, as a collab post with the Makie account."
 role(::Facebook) = "the full video as a Page video post."
-role(::Bluesky) = "a short hook and a link to the YouTube video ($YOUTUBE_LINK), no media: the link shows as a card. " *
-                  "Hashtags and @handles work. The other accounts repost it."
-role(::Mastodon) = "a short hook and a link to the YouTube video ($YOUTUBE_LINK), no media. Hashtags help discovery " *
-                   "there. The other accounts boost it."
+role(::Bluesky) = "a short hook, up to four native images and (when useful) a link to the YouTube video ($YOUTUBE_LINK). " *
+                  "Hashtags and @handles work. A second brand can explicitly reshare the original."
+role(::Mastodon) = "a short hook, up to four native images and (when useful) a link to the YouTube video ($YOUTUBE_LINK). " *
+                   "Hashtags help discovery there. A second brand can explicitly boost the original."
 role(::LinkedIn) = "posted by hand: a native clip, with the YouTube link ($YOUTUBE_LINK) in the first comment. " *
                    "The draft is the post text; put the comment after a line `---`."
 role(::Discourse) = "posted by hand as a new forum topic. Give it a concise title and a Markdown announcement; " *
@@ -94,9 +97,14 @@ function check_draft_text(p::Platform, title::AbstractString, text::AbstractStri
     return nothing
 end
 
-check_draft_media(p::Platform, media::Vector{String}) =
-    carries_media(p) || isempty(media) ||
-        throw(AppError("$(platform_name(p)) drafts link to the video ($YOUTUBE_LINK) and carry no media"))
+function check_draft_media(p::Platform, media::Vector{String})
+    carries_media(p) || isempty(media) || throw(AppError("$(platform_name(p)) drafts carry no media"))
+    length(media) <= max_images(p) || throw(AppError("$(platform_name(p)) allows at most $(max_images(p)) images"))
+    if p isa Union{Bluesky,Mastodon}
+        all(is_post_image, media) || throw(AppError("$(platform_name(p)) posts can only attach images (PNG, JPEG, GIF or WebP)"))
+    end
+    return nothing
+end
 
 "The links a draft's text needs that the project doesn't have yet."
 missing_links(text::AbstractString, p::Project) =

@@ -105,8 +105,8 @@ function BonitoAgents.app_briefing(app::CommunityApp, key::AbstractString)
     - `project_info`: the brief, the brands and their platforms, what each
       platform gets and its limits, the drafts so far and the user's notes.
     - `project_draft`: one draft per brand and platform; `draft_id` replaces
-      one (it goes back to review). Bluesky and Mastodon posts link to the
-      YouTube video with $YOUTUBE_LINK, filled in when they are published.
+      one (it goes back to review). Bluesky and Mastodon can carry up to four
+      native images and link to the YouTube video with $YOUTUBE_LINK.
     - `project_submit`: when the drafts are ready for review.
     - `project_replies` and `project_answer`: answers to the replies, once the
       posts are out. Answer as the brand, briefly and kindly; leave out what
@@ -202,6 +202,7 @@ function draft_line(d::Draft)
     body = isempty(d.title) ? d.text : "title: $(d.title)\n$(d.text)"
     lines = [head, body]
     isempty(d.media) || push!(lines, "media: " * join(d.media, ", "))
+    d.reshare_from == 0 || push!(lines, "reshare: draft #$(d.reshare_from)")
     isempty(d.note) || push!(lines, "user's note: " * d.note)
     isempty(d.posts) || push!(lines, "published: " * join((p.url for p in d.posts if p.kind == "original"), ", "))
     return join(lines, "\n")

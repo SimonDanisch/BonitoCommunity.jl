@@ -114,9 +114,21 @@ function bsky_post_record(a::Account, s::Session, text::AbstractString; reply = 
     return record
 end
 
-function publish(::Bluesky, app::CommunityApp, a::Account, ::Draft, text::AbstractString)
+function bsky_image_embed(app::CommunityApp, a::Account, s::Session, d::Draft)
+    p = find_project(app, d.project)
+    images = [Dict("image" => upload_blob(a, s, read(file), image_content_type(file)),
+                   "alt" => isempty(d.title) ? "Image for $(p.title)" : d.title)
+              for file in draft_images(app, d)]
+    isempty(images) && return nothing
+    return Dict("\$type" => "app.bsky.embed.images", "images" => images)
+end
+
+function publish(::Bluesky, app::CommunityApp, a::Account, d::Draft, text::AbstractString)
     s = session(app, a)
-    r = bsky_create(a, s, "app.bsky.feed.post", bsky_post_record(a, s, text))
+    record = bsky_post_record(a, s, text; card = isempty(d.media))
+    embed = bsky_image_embed(app, a, s, d)
+    embed === nothing || (record["embed"] = embed)
+    r = bsky_create(a, s, "app.bsky.feed.post", record)
     return Post(a.id, "original", r["uri"], r["cid"], bsky_web_url(a.handle, r["uri"]), now(UTC))
 end
 
