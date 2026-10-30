@@ -23,22 +23,43 @@ struct Dashboard{V}
     app::CommunityApp
     view::V
     project::String
+    # Explicitly per-tab presentation state; domain state stays on CommunityApp.
+    ui::Observable{Dict{String,Any}}
+    actions::Observable{Any}
+    feedback::Observable{String}
+    navigate::Observable{String}
+end
+Dashboard(app, view, project) = Dashboard(app, view, project,
+    Observable(Dict{String,Any}("filter" => "all", "showNew" => false, "showAccounts" => false,
+                               "showHandled" => false, "marking" => nothing, "changing" => nothing)),
+    Observable{Any}(nothing), Observable(""), Observable(""))
+
+function Base.close(d::Dashboard)
+    foreach(Bonito.Observables.clear, (d.ui, d.actions, d.feedback, d.navigate))
 end
 
 const CommunityLib = Bonito.ES6Module(joinpath(@__DIR__, "community.js"))
 
 function Bonito.jsrender(session::Bonito.Session, d::Dashboard)
-    act = Observable{Any}(nothing)
-    feedback = Observable("")
-    navigate = Observable("")      # a page to open in a new tab (Google's consent page)
-    on(session, act) do a
-        a isa AbstractVector && length(a) == 3 && pane_action!(d, (; feedback, navigate), a[1], a[2], a[3])
+    on(session, d.actions) do a
+        a isa AbstractVector && length(a) == 3 || error("invalid Community action message")
+        if a[1] == "view"
+            all(k -> haskey(d.ui[], k), keys(a[3])) || error("unknown Community view state")
+            d.ui[] = merge(d.ui[], Dict{String,Any}(a[3]))
+        else
+            pane_action!(d, (; feedback = d.feedback, navigate = d.navigate), a[1], a[2], a[3])
+        end
     end
-    data = map((s, notice) -> dashboard_data(d, s, notice), session, d.app.state, d.app.notice)
-    root = DOM.div(; class = "cm-dash")
-    connect = js"""$(CommunityLib).then(lib => lib.connect($(root), $(data), $(act), $(feedback), $(navigate)))"""
-    return Bonito.jsrender(session, DOM.div(CommunityStyles, root, connect; class = "cm-dash-wrap"))
+    on(session.on_close) do _
+        close(d)
+    end
+    root = dashboard_dom(session, d)
+    pin = pin_dialog()
+    connect = js"""$(CommunityLib).then(lib => new lib.DashboardController($(root), $(pin), $(d.actions), $(d.feedback)))"""
+    return Bonito.jsrender(session, DOM.div(CommunityStyles, root, pin, connect; class = "cm-dash-wrap"))
 end
+
+include("views.jl")
 
 # ── what the page is sent ───────────────────────────────────────────────────
 
@@ -162,7 +183,7 @@ const PANE_ACTIONS = ("new", "rescan", "start", "open", "overview", "add_account
 # A click on the dashboard. What can't be done (an account whose password is
 # wrong, a draft another tab just removed) is said in this tab, not more.
 function pane_action!(d::Dashboard, tab::NamedTuple, action::AbstractString, id, value)
-    action in PANE_ACTIONS || return @info "community action not understood" action
+    action in PANE_ACTIONS || throw(AppError("unknown Community action: $action"))
     try
         r = pane_action!(d, Val(Symbol(action)), id, value)
         r isa OpenPage && (tab.navigate[] = r.url)
@@ -286,7 +307,7 @@ function pane_action!(d::Dashboard, ::Val{:inbox_ask_all}, ::Nothing, ::Nothing)
     return nothing
 end
 
-pane_action!(::Dashboard, action::Val, id, value) = @info "community action not understood" action id value
+pane_action!(::Dashboard, action::Val, id, value) = throw(AppError("invalid Community action arguments: $action"))
 
 # ── styles ──────────────────────────────────────────────────────────────────
 
@@ -321,6 +342,7 @@ const CommunityStyles = Styles(
         CSS(".cm-chat", "max-width" => "none", "min-width" => "0")),
 
     CSS(".cm-region:empty", "display" => "none"),
+    CSS(".cm-region", "display" => "contents"),
     CSS("[data-edit-title][contenteditable='plaintext-only']", "outline" => "none", "border-radius" => "6px",
         "box-shadow" => "0 0 0 2px var(--cm-accent)"),
     CSS(".cm-dash", "padding" => "20px 24px 32px", "display" => "flex", "flex-direction" => "column",
@@ -333,7 +355,7 @@ const CommunityStyles = Styles(
     CSS(".cm-spacer", "flex" => "1 1 auto"),
     CSS(".cm-row", "display" => "flex", "align-items" => "center", "gap" => "8px", "flex-wrap" => "wrap"),
     CSS(".cm-section", "display" => "flex", "flex-direction" => "column", "gap" => "10px"),
-    CSS(".cm-section-head", "display" => "flex", "align-items" => "center", "gap" => "10px"),
+    CSS(".cm-section-head", "display" => "flex", "align-items" => "center", "gap" => "10px", "flex-wrap" => "wrap"),
 
     # cards and panels
     CSS(".cm-card", "background" => "var(--cm-surface)", "border" => "1px solid var(--cm-border)",

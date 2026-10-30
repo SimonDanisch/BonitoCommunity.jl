@@ -2,1236 +2,269 @@
 // deno-lint-ignore-file
 // This code was bundled using `deno bundle` and it's not recommended to edit it manually
 
-function connect(root, data, act, feedback, navigate) {
-    const send = (name, id = null, value = null)=>act.notify([
-            name,
+class DashboardController {
+    constructor(root, dialog, actions, feedback){
+        this.root = root;
+        this.dialog = dialog;
+        this.actions = actions;
+        this.ui = {
+            showNew: false,
+            showAccounts: false,
+            showHandled: false
+        };
+        root.addEventListener('click', (e)=>this.click(e));
+        root.addEventListener('change', (e)=>{
+            if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value);
+        });
+        root.addEventListener('focusout', (e)=>this.save(e.target));
+        root.addEventListener('keydown', (e)=>{
+            if (e.key === 'Enter' && e.target.matches('input[data-save]')) e.target.blur();
+            if (e.key === 'Enter' && e.target.closest('[data-box^="mark-"], [data-box^="changes-"]')) {
+                e.preventDefault();
+                e.target.closest('[data-box]').querySelector('button').click();
+            }
+        });
+        root.addEventListener('dblclick', (e)=>{
+            const n = e.target.closest('[data-edit-title], .cm-draft-text[data-editable]');
+            if (n) this.edit(n);
+        });
+        dialog.addEventListener('click', (e)=>{
+            const act = e.target.closest('[data-act]')?.dataset.act;
+            if (act === 'pin-cancel') dialog.close('cancel');
+            if (act === 'pin-submit') this.submitPin();
+        });
+        dialog.querySelector('form').addEventListener('submit', (e)=>{
+            e.preventDefault();
+            this.submitPin();
+        });
+        dialog.addEventListener('close', ()=>{
+            const resolve = this.pendingPin;
+            this.pendingPin = null;
+            const pin = dialog.returnValue === 'ok' ? dialog.querySelector('[name=pin]').value : null;
+            dialog.querySelectorAll('input').forEach((n)=>n.value = '');
+            resolve?.(pin);
+        });
+        feedback.on((msg)=>{
+            if (!msg) return;
+            const toast = root.querySelector('.cm-toast');
+            toast.textContent = msg;
+            toast.hidden = false;
+            toast.onclick = ()=>toast.hidden = true;
+        });
+    }
+    send(action, id = null, value = null) {
+        this.actions.notify([
+            action,
             id,
             value
         ]);
-    const askPin = (title, confirm = false)=>new Promise((resolve)=>{
-            const dialog = el('dialog', 'cm-pin-dialog');
-            const form = el('form', 'cm-pin-form', {
-                method: 'dialog'
-            });
-            const first = el('input', 'cm-input', {
-                type: 'password',
-                autocomplete: 'new-password',
-                placeholder: 'Community PIN'
-            });
-            const second = confirm ? el('input', 'cm-input', {
-                type: 'password',
-                autocomplete: 'new-password',
-                placeholder: 'Repeat PIN'
-            }) : null;
-            const error = el('div', 'cm-hint');
-            const cancel = btn('Cancel', 'cm-btn-ghost', '');
-            cancel.value = 'cancel';
-            const submit = btn(confirm ? 'Set PIN' : 'Continue', 'cm-btn-primary', '');
-            submit.value = 'ok';
-            form.append(el('div', 'cm-h2', {}, title), el('div', 'cm-hint', {}, confirm ? 'This PIN encrypts platform credentials. It is never stored; losing it means reconnecting accounts.' : 'Credentials will be decrypted only for this one action.'), first, second, error, div('cm-row', submit, cancel));
-            cancel.addEventListener('click', ()=>dialog.close('cancel'));
-            submit.addEventListener('click', ()=>{
-                if (!first.value) {
-                    error.textContent = 'Enter the Community PIN.';
-                    return;
-                }
-                if (second && first.value !== second.value) {
-                    error.textContent = 'The PINs do not match.';
-                    return;
-                }
-                dialog.close('ok');
-            });
-            dialog.addEventListener('close', ()=>{
-                const pin = dialog.returnValue === 'ok' ? first.value : null;
-                dialog.remove();
-                resolve(pin);
-            });
-            dialog.append(form);
-            document.body.append(dialog);
-            dialog.showModal();
-            first.focus();
+    }
+    view(patch) {
+        Object.assign(this.ui, patch);
+        this.send('view', null, patch);
+    }
+    askPin(title, confirm = false) {
+        if (this.pendingPin) throw new Error('A PIN action is already pending');
+        const d = this.dialog;
+        d.querySelector('[data-pin=title]').textContent = title;
+        d.querySelector('[data-pin=error]').textContent = '';
+        d.querySelector('[name=pin_confirmation]').hidden = !confirm;
+        d.querySelector('[data-act=pin-submit]').textContent = confirm ? 'Set PIN' : 'Continue';
+        d.returnValue = '';
+        const result = new Promise((resolve)=>this.pendingPin = resolve);
+        d.showModal();
+        d.querySelector('[name=pin]').focus();
+        return result;
+    }
+    submitPin() {
+        const d = this.dialog, first = d.querySelector('[name=pin]'), second = d.querySelector('[name=pin_confirmation]');
+        const error = d.querySelector('[data-pin=error]');
+        if (!first.value) {
+            error.textContent = 'Enter the Community PIN.';
+            return;
+        }
+        if (!second.hidden && first.value !== second.value) {
+            error.textContent = 'The PINs do not match.';
+            return;
+        }
+        d.close('ok');
+    }
+    async pinAction(title, action, id = null, value = null) {
+        const pin = await this.askPin(title);
+        if (pin) this.send(action, id, value === null ? pin : {
+            ...value,
+            pin
         });
-    const pinAction = (title, action, id, value = {})=>askPin(title).then((pin)=>pin && send(action, id, {
-                ...value,
-                pin
-            }));
-    const ui = {
-        filter: 'all',
-        showNew: false,
-        showAccounts: false,
-        showHandled: false,
-        marking: null,
-        changing: null
-    };
-    const regions = new Map();
-    let current = data.value;
-    let deferred = false;
-    const toast = el('div', 'cm-toast', {
-        role: 'alert',
-        title: 'Click to close'
-    });
-    toast.hidden = true;
-    toast.addEventListener('click', ()=>{
-        toast.hidden = true;
-    });
-    feedback.on((msg)=>{
-        if (!msg) return;
-        toast.textContent = msg;
-        toast.hidden = false;
-        clearTimeout(toast._t);
-        toast._t = setTimeout(()=>{
-            toast.hidden = true;
-        }, 8000);
-    });
-    navigate.on((url)=>{
-        if (!url) return;
-        if (ui.loginTab && !ui.loginTab.closed) ui.loginTab.location.href = url;
-        else window.open(url, '_blank', 'noopener');
-        ui.loginTab = null;
-    });
-    feedback.on((msg)=>{
-        if (msg && ui.loginTab) {
-            ui.loginTab.close();
-            ui.loginTab = null;
-        }
-    });
-    const render = ()=>{
-        deferred = false;
-        const spec = current.mode === 'overview' ? overviewRegions(current, ui) : current.mode === 'project' ? projectRegions(current, ui) : [
-            [
-                'missing',
-                '',
-                ()=>[
-                        el('div', 'cm-empty', {}, `This project (${current.project_id}) is gone.`)
-                    ]
-            ]
+    }
+    save(t) {
+        if (!t.dataset.save || t.value === t.dataset.saved) return;
+        t.dataset.saved = t.value;
+        if (t.dataset.save.startsWith('link:')) this.send('link', t.dataset.id, {
+            key: t.dataset.save.slice(5),
+            url: t.value.trim()
+        });
+        else this.send(t.dataset.save, t.dataset.id, t.value);
+    }
+    edit(node) {
+        if (node.isContentEditable) return;
+        const before = node.dataset.raw ?? node.textContent, children = [
+            ...node.childNodes
         ];
-        if (!regions.size) root.replaceChildren(toast, ...spec.map(([key])=>{
-            const node = el('div', 'cm-region', {
-                'data-region': key
-            });
-            regions.set(key, {
-                node,
-                sig: null
-            });
-            return node;
-        }));
-        for (const [key, sig, build] of spec){
-            const r = regions.get(key);
-            if (!r || r.sig === sig) continue;
-            const a = document.activeElement;
-            const inside = a && r.node.contains(a);
-            if (inside && a.isContentEditable) {
-                deferred = true;
-                continue;
+        node.textContent = before;
+        node.contentEditable = 'plaintext-only';
+        node.focus();
+        const abort = new AbortController();
+        const finish = (save)=>{
+            abort.abort();
+            node.contentEditable = 'false';
+            const value = node.textContent.trim();
+            if (save && value && value !== before) this.send(node.dataset.editTitle ? 'title' : 'edit', node.dataset.editTitle ?? Number(node.closest('[data-draft]').dataset.draft), value);
+            else node.replaceChildren(...children);
+        };
+        node.addEventListener('blur', ()=>finish(true), {
+            signal: abort.signal
+        });
+        node.addEventListener('keydown', (e)=>{
+            if (e.key === 'Escape' || e.key === 'Enter' && node.dataset.editTitle) {
+                e.preventDefault();
+                finish(e.key === 'Enter');
             }
-            const kept = inside && a.matches('textarea, input') ? {
-                at: focusKey(a),
-                value: a.value,
-                start: a.selectionStart,
-                end: a.selectionEnd
-            } : null;
-            r.node.replaceChildren(...build());
-            r.sig = sig;
-            const b = kept && kept.at && r.node.querySelector(kept.at);
-            if (b) {
-                b.value = kept.value;
-                b.focus();
-                if (b.tagName === 'TEXTAREA' || [
-                    'text',
-                    'search',
-                    'password'
-                ].includes(b.type)) b.setSelectionRange(kept.start, kept.end);
-            }
-        }
-    };
-    const rerender = ()=>{
-        for (const r of regions.values())r.sig = null;
-        render();
-    };
-    data.on((value)=>{
-        current = value;
-        render();
-    });
-    root.addEventListener('focusout', ()=>setTimeout(()=>deferred && render(), 0));
-    render();
-    root.addEventListener('click', (e)=>{
+        }, {
+            signal: abort.signal
+        });
+    }
+    checked(node) {
+        return [
+            ...node.querySelectorAll('.cm-brand-toggle.cm-on')
+        ].map((b)=>b.dataset.value);
+    }
+    click(e) {
         const b = e.target.closest('[data-act]');
         if (!b || b.disabled) return;
         e.stopPropagation();
-        const a = b.dataset.act, id = b.dataset.id ?? null, num = id === null ? null : Number(id);
-        const box = b.closest('[data-box]');
+        const a = b.dataset.act, id = b.dataset.id ?? null, num = Number(b.dataset.num ?? id), box = b.closest('[data-box]');
         switch(a){
             case 'toggle-new':
-                ui.showNew = !ui.showNew;
-                ui.showAccounts = false;
-                return rerender();
+                return this.view({
+                    showNew: !this.ui.showNew,
+                    showAccounts: false
+                });
             case 'toggle-accounts':
-                ui.showAccounts = !ui.showAccounts;
-                ui.showNew = false;
-                return rerender();
+                return this.view({
+                    showAccounts: !this.ui.showAccounts,
+                    showNew: false
+                });
             case 'toggle-handled':
-                ui.showHandled = !ui.showHandled;
-                return rerender();
-            case 'inbox-save':
-                return send('inbox_answer', id, box.querySelector('[name=answer]').value);
-            case 'inbox-send':
-                {
-                    const text = box.querySelector('[name=answer]').value.trim();
-                    if (!text) return;
-                    return pinAction('Send this answer?', 'inbox_send', id, {
-                        text
-                    });
-                }
+                return this.view({
+                    showHandled: !this.ui.showHandled
+                });
             case 'filter':
-                ui.filter = b.dataset.value;
-                return rerender();
+                return this.view({
+                    filter: b.dataset.value
+                });
+            case 'mark-open':
+                return this.view({
+                    marking: num
+                });
+            case 'changes-open':
+                return this.view({
+                    changing: num
+                });
+            case 'cancel':
+                return this.view({
+                    marking: null,
+                    changing: null
+                });
             case 'create':
                 {
                     const title = box.querySelector('[name=title]').value.trim();
                     if (!title) return box.querySelector('[name=title]').focus();
-                    send('new', null, {
+                    this.send('new', null, {
                         title,
-                        brands: checked(box),
+                        brands: this.checked(box),
                         brief: box.querySelector('[name=brief]').value
                     });
-                    ui.showNew = false;
-                    return rerender();
-                }
-            case 'google-client':
-                {
-                    const v = (name)=>box.querySelector(`[name=${name}]`).value.trim();
-                    return pinAction('Unlock to save the Google client', 'google_client', null, {
-                        client_id: v('client_id'),
-                        client_secret: v('client_secret')
+                    return this.view({
+                        showNew: false
                     });
                 }
-            case 'add-meta':
-                {
-                    const token = box.querySelector('[name=page_token]');
-                    pinAction('Unlock to check Facebook and Instagram', 'add_meta', null, {
-                        brand: box.querySelector('[name=meta_brand]').value,
-                        token: token.value.trim()
-                    });
-                    token.value = '';
-                    return;
-                }
-            case 'connect-youtube':
-                ui.loginTab = window.open('', '_blank');
-                return send('connect_youtube', null, box.querySelector('[name=yt_brand]').value);
-            case 'add-account':
-                {
-                    const role = b.dataset.role;
-                    const form = role === 'amplify' ? b.closest('details').querySelector('[data-account-form=amplify]') : box.querySelector('[data-account-form=post]');
-                    const v = (name)=>form.querySelector(`[name=${name}]`)?.value.trim() || '';
-                    pinAction('Unlock to check and add this account', 'add_account', null, {
-                        platform: b.dataset.platform,
-                        brand: role === 'amplify' ? '' : v('brand'),
-                        role,
-                        handle: v('handle'),
-                        server: '',
-                        secret: v('secret')
-                    });
-                    form.querySelector('[name=secret]').value = '';
-                    return;
-                }
-            case 'set-pin':
-                return askPin('Set Community PIN', true).then((pin)=>pin && send('set_pin', null, pin));
-            case 'check-updates':
-                return askPin('Check replies and mentions now').then((pin)=>pin && send('check_updates', null, pin));
-            case 'remove-account':
-                return pinAction('Unlock to remove this account', 'remove_account', id);
             case 'brand':
                 {
                     b.classList.toggle('cm-on');
                     const group = b.closest('[data-brands]');
-                    if (group.dataset.brands) send('brands', group.dataset.brands, checked(group));
+                    if (group.dataset.brands) this.send('brands', group.dataset.brands, this.checked(group));
                     return;
                 }
-            case 'mark-open':
-                ui.marking = num;
-                return rerender();
-            case 'mark':
+            case 'set-pin':
+                return this.askPin('Set Community PIN', true).then((pin)=>pin && this.send('set_pin', null, pin));
+            case 'check-updates':
+                return this.pinAction('Check replies and mentions', 'check_updates');
+            case 'remove-account':
+                return this.pinAction('Remove this account?', 'remove_account', id);
+            case 'publish':
+                return this.pinAction('Publish this approved post?', 'publish', num);
+            case 'publish-all':
+                return this.pinAction('Publish all approved automatic posts?', 'publish_all', id);
+            case 'add-account':
                 {
-                    const url = box.querySelector('[name=url]').value.trim();
-                    if (url) {
-                        send('mark', num, url);
-                        ui.marking = null;
-                    }
-                    return;
+                    const role = b.dataset.role, form = role === 'amplify' ? b.closest('details').querySelector('[data-account-form=amplify]') : box.querySelector('[data-account-form=post]');
+                    const v = (name)=>form.querySelector(`[name=${name}]`)?.value.trim() || '';
+                    const value = {
+                        platform: b.dataset.platform,
+                        role,
+                        brand: v('brand'),
+                        handle: v('handle'),
+                        server: '',
+                        secret: v('secret')
+                    };
+                    form.querySelector('[name=secret]').value = '';
+                    return this.pinAction('Check and add this account', 'add_account', null, value);
                 }
-            case 'changes-open':
-                ui.changing = num;
-                rerender();
-                return root.querySelector(`[data-box="changes-${num}"] [name=note]`)?.focus();
-            case 'changes':
+            case 'add-meta':
                 {
-                    const note = box.querySelector('[name=note]').value.trim();
-                    if (note) {
-                        send('changes', num, note);
-                        ui.changing = null;
-                    }
-                    return;
+                    const token = box.querySelector('[name=page_token]'), value = {
+                        brand: box.querySelector('[name=meta_brand]').value,
+                        token: token.value.trim()
+                    };
+                    token.value = '';
+                    return this.pinAction('Connect Facebook and Instagram', 'add_meta', null, value);
                 }
-            case 'cancel':
-                ui.marking = ui.changing = null;
-                return rerender();
-            case 'edit':
-                return editText(root.querySelector(`[data-draft="${num}"] .cm-draft-text`), num, send);
-            case 'copy':
-                return navigator.clipboard.writeText(b.dataset.value);
-            case 'save-answer':
-                return send('answer', id, box.querySelector('[name=answer]').value);
             case 'send':
+            case 'inbox-send':
                 {
                     const text = box.querySelector('[name=answer]').value.trim();
-                    if (!text) return;
-                    return pinAction('Send this answer?', 'send', id, {
+                    if (text) return this.pinAction('Send this answer?', a === 'send' ? 'send' : 'inbox_send', id, {
                         text
                     });
+                    return;
                 }
-            case 'publish':
-                return pinAction('Publish this approved post?', 'publish', num);
-            case 'publish-all':
-                return pinAction('Publish every approved automatic post in this release?', 'publish_all', id);
+            case 'save-answer':
+            case 'inbox-save':
+                return this.send(a === 'save-answer' ? 'answer' : 'inbox_answer', id, box.querySelector('[name=answer]').value);
+            case 'mark':
+            case 'changes':
+                {
+                    const value = box.querySelector(a === 'mark' ? '[name=url]' : '[name=note]').value.trim();
+                    if (value) {
+                        this.send(a, num, value);
+                        this.view({
+                            marking: null,
+                            changing: null
+                        });
+                    }
+                    return;
+                }
+            case 'edit':
+                return this.edit(this.root.querySelector(`[data-draft="${num}"] .cm-draft-text`));
+            case 'copy':
+                return navigator.clipboard.writeText(b.dataset.value);
             case 'open-card':
-                return b.dataset.chat ? send('open', b.dataset.chat) : null;
+                if (b.dataset.chat) this.send('open', b.dataset.chat);
+                return;
             default:
-                return send(a, b.dataset.num !== undefined ? Number(b.dataset.num) : id, b.dataset.value ?? null);
+                return this.send(a, b.dataset.num === undefined ? id : num, b.dataset.value ?? null);
         }
-    });
-    root.addEventListener('change', (e)=>{
-        const t = e.target;
-        if (t.matches('[name=state]')) send('state', t.dataset.id, t.value);
-    });
-    root.addEventListener('focusout', (e)=>{
-        const t = e.target;
-        if (t.dataset.save && t.value !== t.dataset.saved) {
-            t.dataset.saved = t.value;
-            if (t.dataset.save.startsWith('link:')) send('link', t.dataset.id, {
-                key: t.dataset.save.slice(5),
-                url: t.value.trim()
-            });
-            else send(t.dataset.save, t.dataset.id, t.value);
-        }
-    });
-    root.addEventListener('keydown', (e)=>{
-        const t = e.target;
-        if (e.key === 'Enter' && t.matches('input[data-save]')) t.blur();
-        if (e.key === 'Enter' && t.matches('[data-box^="mark-"] input')) t.closest('[data-box]').querySelector('[data-act=mark]').click();
-        if (e.key === 'Enter' && !e.shiftKey && t.matches('[data-box^="changes-"] input')) t.closest('[data-box]').querySelector('[data-act=changes]').click();
-        if (e.key === 'Escape' && (ui.marking !== null || ui.changing !== null)) {
-            ui.marking = ui.changing = null;
-            rerender();
-        }
-    });
-    root.addEventListener('dblclick', (e)=>{
-        const text = e.target.closest('.cm-draft-text[data-editable]');
-        if (text) return editText(text, Number(text.closest('[data-draft]').dataset.draft), send);
-        const title = e.target.closest('[data-edit-title]');
-        if (title) editTitle(title, send);
-    });
-}
-function focusKey(n) {
-    const box = n.closest('[data-box]');
-    if (box && n.name) return `[data-box="${box.dataset.box}"] [name="${n.name}"]`;
-    if (n.dataset.save) return `[data-save="${n.dataset.save}"][data-id="${n.dataset.id}"]`;
-    return null;
-}
-const checked = (node)=>[
-        ...node.querySelectorAll('.cm-brand-toggle.cm-on')
-    ].map((b)=>b.dataset.value);
-const sig = (x)=>JSON.stringify(x);
-function el(tag, className, attrs = {}, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    for (const [k, v] of Object.entries(attrs))if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v === true ? '' : v);
-    if (text !== undefined) node.textContent = text;
-    return node;
-}
-const div = (cls, ...kids)=>{
-    const d = el('div', cls);
-    d.append(...kids.filter((k)=>k !== null && k !== undefined));
-    return d;
-};
-function btn(label, kind, act, attrs = {}) {
-    const b = el('button', `cm-btn cm-btn-sm ${kind}`, {
-        type: 'button',
-        'data-act': act,
-        ...attrs
-    }, label);
-    return b;
-}
-function svg(path, viewBox = '0 0 24 24') {
-    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    s.setAttribute('viewBox', viewBox);
-    s.setAttribute('width', '14');
-    s.setAttribute('height', '14');
-    s.innerHTML = path;
-    return s;
-}
-const GLYPHS = {
-    youtube: ()=>svg('<path fill="#fff" d="M9 7.2v9.6l7.8-4.8z"/>'),
-    instagram: ()=>svg('<rect x="4" y="4" width="16" height="16" rx="5" fill="none" stroke="#fff" stroke-width="2"/><circle cx="12" cy="12" r="3.6" fill="none" stroke="#fff" stroke-width="2"/><circle cx="16.9" cy="7.1" r="1.2" fill="#fff"/>'),
-    bluesky: ()=>svg('<path fill="#fff" d="M6.3 4.6c2.1 1.6 4.4 4.8 5.7 6.5 1.3-1.7 3.6-4.9 5.7-6.5 1.5-1.1 4-2 4 .8 0 .6-.3 4.7-.5 5.4-.7 2.4-3.1 3-5.3 2.6 3.8.7 4.8 2.8 2.7 5-4 4-5.7-1-6.2-2.3l-.4-1-.4 1c-.5 1.3-2.2 6.3-6.2 2.3-2.1-2.2-1.1-4.3 2.7-5-2.2.4-4.6-.2-5.3-2.6-.2-.7-.5-4.8-.5-5.4 0-2.8 2.5-1.9 4-.8z"/>'),
-    tiktok: ()=>'♪',
-    facebook: ()=>'f',
-    mastodon: ()=>'m',
-    linkedin: ()=>'in',
-    discourse: ()=>'D',
-    github: ()=>'GH'
-};
-function platformBadge(platforms, id, small = false) {
-    const p = platforms.find((p)=>p.id === id) || {
-        color: '#888',
-        name: id
-    };
-    const b = el('span', 'cm-plat' + (small ? ' cm-plat-sm' : ''), {
-        title: p.name,
-        style: `--plat:${p.color}`
-    });
-    b.append(GLYPHS[id] ? GLYPHS[id]() : id[0].toUpperCase());
-    return b;
-}
-const platformName = (platforms, id)=>(platforms.find((p)=>p.id === id) || {
-        name: id
-    }).name;
-const platformColor = (platforms, id)=>(platforms.find((p)=>p.id === id) || {
-        color: '#888'
-    }).color;
-const count = (n)=>n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
-const STAT_LABELS = [
-    [
-        'views',
-        'views'
-    ],
-    [
-        'likes',
-        'likes'
-    ],
-    [
-        'reposts',
-        'reposts'
-    ],
-    [
-        'replies',
-        'replies'
-    ]
-];
-function statsRow(stats) {
-    const parts = STAT_LABELS.filter(([k])=>stats && stats[k]).map(([k, label])=>`${count(stats[k])} ${label}`);
-    return parts.length ? el('div', 'cm-stats', {}, parts.join(' · ')) : null;
-}
-const BRAND_COLORS = {
-    Makie: '#e05a7a',
-    Bonito: '#2f9e8f',
-    Makie4Science: '#3a7fc4'
-};
-function brandPill(name) {
-    return el('span', 'cm-pill cm-pill-dot', {
-        style: `--dot:${BRAND_COLORS[name] || 'var(--bt-accent)'}`
-    }, name);
-}
-function brandToggles(brands, on, projectId) {
-    const box = el('div', 'cm-row', {
-        'data-brands': projectId || ''
-    });
-    for (const name of brands){
-        const b = el('button', 'cm-pill cm-pill-dot cm-brand-toggle' + (on.includes(name) ? ' cm-on' : ''), {
-            type: 'button',
-            'data-act': 'brand',
-            'data-value': name,
-            style: `--dot:${BRAND_COLORS[name] || 'var(--bt-accent)'}`
-        }, name);
-        box.append(b);
     }
-    return box;
 }
-function steps(states, state, labeled = false) {
-    const now = states.indexOf(state);
-    const box = el('div', 'cm-steps' + (labeled ? ' cm-steps-labeled' : ''), {
-        title: `State: ${state}`
-    });
-    states.forEach((s, i)=>{
-        const bar = el('div', 'cm-step' + (i < now ? ' cm-step-done' : i === now ? ' cm-step-now' : ''));
-        if (!labeled) return box.append(bar);
-        box.append(div('cm-step-wrap', bar, el('span', 'cm-step-label' + (i === now ? ' cm-step-label-now' : ''), {}, s)));
-    });
-    return box;
-}
-function cover(card) {
-    const box = el('div', 'cm-cover');
-    const c = card.cover;
-    if (c && c.video) box.append(el('video', '', {
-        src: c.url + '#t=2',
-        preload: 'metadata',
-        muted: true,
-        playsinline: true
-    }));
-    else if (c && c.image) box.append(el('img', '', {
-        src: c.url,
-        alt: '',
-        loading: 'lazy'
-    }));
-    else box.append(el('span', 'cm-cover-letter', {}, card.title.slice(0, 1).toUpperCase()));
-    return box;
-}
-function editText(node, id, send) {
-    if (!node || node.isContentEditable) return;
-    const before = node.dataset.raw;
-    node.textContent = before;
-    node.contentEditable = 'plaintext-only';
-    node.focus();
-    const finish = (save)=>{
-        node.removeEventListener('keydown', key);
-        node.removeEventListener('blur', blur);
-        node.contentEditable = 'false';
-        const now = node.textContent.trim();
-        if (save && now && now !== before) send('edit', id, now);
-        else node.replaceChildren(...linkified(before));
-    };
-    const key = (k)=>{
-        if (k.key === 'Escape') {
-            k.preventDefault();
-            finish(false);
-        }
-    };
-    const blur = ()=>finish(true);
-    node.addEventListener('keydown', key);
-    node.addEventListener('blur', blur);
-}
-function editTitle(node, send) {
-    if (node.isContentEditable) return;
-    const before = node.textContent;
-    node.contentEditable = 'plaintext-only';
-    node.focus();
-    const finish = (save)=>{
-        node.removeEventListener('keydown', key);
-        node.removeEventListener('blur', blur);
-        node.contentEditable = 'false';
-        const now = node.textContent.trim();
-        if (save && now && now !== before) send('title', node.dataset.editTitle, now);
-        else node.textContent = before;
-    };
-    const key = (k)=>{
-        if (k.key === 'Enter') {
-            k.preventDefault();
-            finish(true);
-        } else if (k.key === 'Escape') {
-            k.preventDefault();
-            finish(false);
-        }
-    };
-    const blur = ()=>finish(true);
-    node.addEventListener('keydown', key);
-    node.addEventListener('blur', blur);
-}
-const CHIPS = {
-    '{youtube_url}': [
-        '▶ YouTube link',
-        "The project's YouTube link, filled in when it is published"
-    ],
-    '{blog_url}': [
-        '✎ Blog link',
-        "The project's blog post, filled in when it is published"
-    ]
-};
-function linkified(text) {
-    return text.split(/(\{youtube_url\}|\{blog_url\})/).map((part)=>CHIPS[part] ? el('span', 'cm-link-chip', {
-            title: CHIPS[part][1]
-        }, CHIPS[part][0]) : document.createTextNode(part));
-}
-function overviewRegions(d, ui) {
-    const p = d.projects;
-    const review = p.reduce((n, x)=>n + x.counts.review, 0), replies = p.reduce((n, x)=>n + x.new_replies, 0);
-    return [
-        [
-            'top',
-            sig([
-                p.length,
-                review,
-                replies,
-                ui.showNew,
-                ui.showAccounts,
-                d.accounts.length
-            ]),
-            ()=>{
-                const top = div('cm-top', div('', el('h1', 'cm-h1', {}, 'Community'), el('div', 'cm-sub', {}, [
-                    `${p.length} project${p.length === 1 ? '' : 's'}`,
-                    review ? `${review} draft${review === 1 ? '' : 's'} to review` : '',
-                    replies ? `${replies} new repl${replies === 1 ? 'y' : 'ies'}` : ''
-                ].filter(Boolean).join(' · '))), el('div', 'cm-spacer'), btn(`Accounts${d.accounts.length ? ` (${d.accounts.length})` : ''}`, ui.showAccounts ? 'cm-btn-secondary cm-filter-on' : 'cm-btn-secondary', 'toggle-accounts'), btn('Rescan', 'cm-btn-ghost', 'rescan', {
-                    title: 'Pick up folders added to the projects folder'
-                }), btn('New project', 'cm-btn-primary', 'toggle-new'));
-                return [
-                    top
-                ];
-            }
-        ],
-        [
-            'notice',
-            sig(d.notice),
-            ()=>d.notice ? [
-                    el('div', 'cm-notice', {}, d.notice)
-                ] : []
-        ],
-        [
-            'new',
-            sig([
-                ui.showNew,
-                d.brands
-            ]),
-            ()=>ui.showNew ? [
-                    newProject(d)
-                ] : []
-        ],
-        [
-            'accounts',
-            sig([
-                ui.showAccounts,
-                d.accounts,
-                d.vault_set
-            ]),
-            ()=>ui.showAccounts ? [
-                    accounts(d)
-                ] : []
-        ],
-        [
-            'inbox',
-            sig([
-                d.inbox,
-                ui.showHandled,
-                d.watches
-            ]),
-            ()=>[
-                    inboxSection(d, ui)
-                ]
-        ],
-        [
-            'grid',
-            sig([
-                p,
-                d.states
-            ]),
-            ()=>[
-                    div('cm-section', div('cm-section-head', el('div', 'cm-h2', {}, 'Projects')), projectGrid(d))
-                ]
-        ]
-    ];
-}
-function newProject(d) {
-    const box = el('div', 'cm-card cm-panel', {
-        'data-box': 'new'
-    });
-    box.append(el('div', 'cm-h2', {}, 'New project'), el('input', 'cm-input', {
-        name: 'title',
-        type: 'text',
-        placeholder: 'Title, e.g. "Black hole render"',
-        autocomplete: 'off'
-    }), brandToggles(d.brands, []), el('textarea', 'cm-textarea', {
-        name: 'brief',
-        placeholder: 'Brief: what it is about, what the posts should say'
-    }), el('div', 'cm-hint', {}, `Creates a folder in ${d.folder}; put the video and other material there.`), div('cm-row', btn('Create project', 'cm-btn-primary', 'create'), btn('Cancel', 'cm-btn-ghost', 'toggle-new')));
-    return box;
-}
-const field = (label, input)=>{
-    const f = el('label', 'cm-field');
-    f.append(label, input);
-    return f;
-};
-const select = (name, options)=>{
-    const s = el('select', 'cm-select', {
-        name
-    });
-    for (const [v, label] of options)s.append(el('option', '', {
-        value: v
-    }, label));
-    return s;
-};
-const credentialSteps = (...items)=>{
-    const list = el('ol', 'cm-credential-steps');
-    list.append(...items.map((x)=>el('li', '', {}, x)));
-    return list;
-};
-function configuredAccounts(d, platform) {
-    const list = d.accounts.filter((a)=>a.platform === platform);
-    return list.length ? div('cm-configured', ...list.map((a)=>div('cm-account', el('span', 'cm-account-handle', {
-            title: a.server
-        }, '@' + a.handle), a.brand ? brandPill(a.brand) : el('span', 'cm-pill', {}, 'personal reposts'), btn('Remove', 'cm-btn-ghost', 'remove_account', {
-            'data-id': a.id
-        })))) : el('div', 'cm-hint', {}, 'Not connected yet.');
-}
-function brandSelect(d, platform) {
-    return select('brand', (d.brand_platforms ? d.brands.filter((b)=>(d.brand_platforms[b] || []).includes(platform)) : d.brands).map((b)=>[
-            b,
-            b
-        ]));
-}
-function networkCard(d, platform, title, instructions, handleLabel, handlePlaceholder, secretLabel) {
-    const card = el('section', 'cm-card cm-platform-card', {
-        'data-box': `account-${platform}`
-    });
-    const form = div('cm-form-grid', field('Post as', brandSelect(d, platform)), field(handleLabel, el('input', 'cm-input', {
-        name: 'handle',
-        type: 'text',
-        placeholder: handlePlaceholder,
-        autocomplete: 'off'
-    })), field(secretLabel, el('input', 'cm-input', {
-        name: 'secret',
-        type: 'password',
-        autocomplete: 'new-password'
-    })));
-    form.setAttribute('data-account-form', 'post');
-    card.append(div('cm-platform-head', platformBadge(d.platforms, platform), div('', el('div', 'cm-h2', {}, title), el('div', 'cm-sub', {}, 'Automatic publishing'))), configuredAccounts(d, platform), credentialSteps(...instructions), form, div('cm-row', btn(`Check and connect ${title}`, 'cm-btn-primary', 'add-account', {
-        'data-platform': platform,
-        'data-role': 'post'
-    })));
-    const amplify = el('details', 'cm-amplify');
-    const personal = div('cm-form-grid', field(handleLabel, el('input', 'cm-input', {
-        name: 'handle',
-        type: 'text',
-        placeholder: handlePlaceholder,
-        autocomplete: 'off'
-    })), field(secretLabel, el('input', 'cm-input', {
-        name: 'secret',
-        type: 'password',
-        autocomplete: 'new-password'
-    })));
-    personal.setAttribute('data-account-form', 'amplify');
-    amplify.append(el('summary', '', {}, 'Optional: add a personal account that reposts releases'), el('div', 'cm-hint', {}, 'This account does not create brand posts. It only reposts the approved post after it goes out.'), personal, div('cm-row', btn('Check and add repost account', 'cm-btn-secondary', 'add-account', {
-        'data-platform': platform,
-        'data-role': 'amplify'
-    })));
-    card.append(amplify);
-    return card;
-}
-function manualCard(d, platform, title, text) {
-    const card = el('section', 'cm-card cm-platform-card cm-platform-manual');
-    card.append(div('cm-platform-head', platformBadge(d.platforms, platform), div('', el('div', 'cm-h2', {}, title), el('div', 'cm-sub', {}, 'Manual posting — no credentials stored'))), el('div', 'cm-manual-copy', {}, text));
-    return card;
-}
-function metaCard(d) {
-    const card = el('section', 'cm-card cm-platform-card', {
-        'data-box': 'meta'
-    });
-    card.append(div('cm-platform-head', platformBadge(d.platforms, 'facebook'), platformBadge(d.platforms, 'instagram'), div('', el('div', 'cm-h2', {}, 'Facebook Page + Instagram'), el('div', 'cm-sub', {}, 'One optional Page token covers both'))), el('div', 'cm-hint', {}, 'Not needed for this announcement. Meta automation is optional and substantially more involved than the other platforms.'), credentialSteps('Create a Meta Business app and a Facebook Page token with Page publishing plus Instagram content-publishing permissions.', 'Link a Professional Instagram account to that Facebook Page.', 'Paste the Page token below. Community verifies the Page and discovers the linked Instagram account.'), div('cm-form-grid', field('Post as', brandSelect(d, 'facebook')), field('Facebook Page access token', el('input', 'cm-input', {
-        name: 'page_token',
-        type: 'password',
-        autocomplete: 'new-password'
-    }))), div('cm-row', btn('Check and connect Page', 'cm-btn-primary', 'add-meta')));
-    return card;
-}
-function youtubeCard(d) {
-    const card = el('section', 'cm-card cm-platform-card cm-platform-manual');
-    card.append(div('cm-platform-head', platformBadge(d.platforms, 'youtube'), div('', el('div', 'cm-h2', {}, 'YouTube'), el('div', 'cm-sub', {}, 'Optional — not needed for this announcement'))), credentialSteps('In Google Cloud, create a project and enable YouTube Data API v3.', 'Configure the OAuth consent screen and create a Desktop OAuth client.', 'Save its client ID and secret, then connect the channel in a PIN-authorised browser login.'), el('div', 'cm-hint', {}, 'The PIN-safe channel-login continuation is the remaining YouTube setup item; do not enter credentials here yet.'));
-    return card;
-}
-function accounts(d) {
-    const box = el('div', 'cm-card cm-panel', {
-        'data-box': 'accounts'
-    });
-    box.append(el('div', 'cm-h2', {}, 'Publishing accounts'), el('div', 'cm-hint', {}, 'Only Bluesky and Mastodon need setup for the first BonitoAgents announcement. Each credential is encrypted and requested again only for the action that uses it.'));
-    if (!d.vault_set) {
-        box.append(el('div', 'cm-vault-callout', {}, 'First set a Community PIN. It encrypts credentials but is never stored.'), div('cm-row', btn('Set Community PIN', 'cm-btn-primary', 'set-pin')));
-        return box;
-    }
-    const grid = el('div', 'cm-platform-grid');
-    grid.append(networkCard(d, 'bluesky', 'Bluesky', [
-        'Open Settings → Privacy and security → App passwords.',
-        'Create an app password named “Community”; never use your normal password.',
-        'Enter the handle and app password below.'
-    ], 'Bluesky handle', 'makie.org', 'App password'), networkCard(d, 'mastodon', 'Mastodon', [
-        'Open your instance → Preferences → Development → New application.',
-        'Grant read and write scopes, then copy its access token.',
-        'Enter the full handle including its instance; no separate server field is needed.'
-    ], 'Full Mastodon handle', 'makie@fosstodon.org', 'Access token'), manualCard(d, 'linkedin', 'LinkedIn', 'Approve the draft, use Copy text, publish it in LinkedIn, then paste the resulting post URL back into Community.'), manualCard(d, 'discourse', 'Discourse', 'No credential is needed. Each release gets its own reviewable forum-topic draft: copy it into Discourse, publish it, then paste the topic URL back here.'), youtubeCard(d), metaCard(d));
-    box.append(grid, div('cm-row', btn('Close', 'cm-btn-ghost', 'toggle-accounts')));
-    return box;
-}
-function inboxSection(d, ui) {
-    const open = d.inbox.filter((x)=>x.status === 'new' || x.status === 'drafted');
-    const handled = d.inbox.length - open.length;
-    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Inbox'), el('span', 'cm-sub', {}, open.length ? `${open.length} open` : ''), el('span', 'cm-spacer'), btn('Check updates', 'cm-btn-ghost', 'check-updates', {
-        title: 'Unlock credentials only while checking replies and mentions'
-    }), handled ? el('button', 'cm-filter' + (ui.showHandled ? ' cm-filter-on' : ''), {
-        type: 'button',
-        'data-act': 'toggle-handled'
-    }, `Handled ${handled}`) : null, open.length ? btn('Draft answers', 'cm-btn-secondary', 'inbox_ask_all', {
-        title: "Ask the overview's agent to draft answers to the open items"
-    }) : null);
-    const shown = ui.showHandled ? d.inbox : open;
-    if (!shown.length) {
-        return div('cm-section', head, el('div', 'cm-empty', {}, 'Nothing new. Mentions of the accounts, new forum topics and new releases ' + `show up here (watching ${d.watches.length} source${d.watches.length === 1 ? '' : 's'}).`));
-    }
-    const list = el('div', 'cm-replies');
-    for (const x of shown)list.append(inboxCard(d, x));
-    return div('cm-section', head, list);
-}
-function inboxCard(d, x) {
-    const done = ![
-        'new',
-        'drafted'
-    ].includes(x.status);
-    const card = el('div', 'cm-card cm-reply' + (done ? ' cm-handled' : ''), {
-        style: `--plat:${platformColor(d.sources, x.source)}`,
-        'data-box': `inbox-${x.ref}`
-    });
-    const avatar = el('div', 'cm-avatar', {}, (x.author_name || x.author || '?').slice(0, 1).toUpperCase());
-    const main = el('div', 'cm-section');
-    main.style.gap = '6px';
-    main.append(div('cm-row', el('strong', '', {}, x.author_name || x.author), el('span', 'cm-sub', {}, `@${x.author} · ${x.when}`), platformBadge(d.sources, x.source, true), x.brand ? brandPill(x.brand) : null, el('span', 'cm-spacer'), el('span', `cm-status cm-status-${x.status}`, {}, x.status === 'new' && x.kind !== 'mention' ? x.kind : x.status)));
-    if (x.title) main.append(el('a', 'cm-topic-title', {
-        href: x.url,
-        target: '_blank',
-        rel: 'noopener'
-    }, x.title));
-    main.append(el('div', 'cm-reply-text', {}, x.text), el('a', 'cm-sub', {
-        href: x.url,
-        target: '_blank',
-        rel: 'noopener'
-    }, 'Open on ' + platformName(d.sources, x.source) + ' ↗'));
-    if (done) {
-        if (x.answer) main.append(div('cm-answer', el('div', 'cm-sub', {}, x.status === 'answered' ? 'Answered:' : 'Drafted:'), el('div', 'cm-reply-text', {}, x.answer)));
-        main.append(div('cm-row', btn('Reopen', 'cm-btn-ghost', 'inbox_reopen', {
-            'data-id': x.ref
-        })));
-    } else if (x.kind === 'release') {
-        main.append(div('cm-row', btn('Start a project', 'cm-btn-primary', 'inbox_project', {
-            'data-id': x.ref,
-            title: 'A project for its blog post and the announcements'
-        }), el('span', 'cm-spacer'), btn('Ignore', 'cm-btn-ghost', 'inbox_ignore', {
-            'data-id': x.ref
-        })));
-    } else {
-        const answer = el('textarea', 'cm-textarea', {
-            name: 'answer',
-            placeholder: x.kind === 'topic' ? 'An answer for the forum…' : 'Your answer…'
-        });
-        answer.value = x.answer;
-        answer.style.minHeight = '60px';
-        const send = x.kind === 'mention' ? btn('Send', 'cm-btn-primary', 'inbox-send', {
-            'data-id': x.ref,
-            title: 'Send this answer now'
-        }) : btn('Copy answer', 'cm-btn-primary', 'copy', {
-            'data-value': x.answer,
-            disabled: !x.answer,
-            title: 'Copy it, then answer on the forum'
-        });
-        main.append(answer, div('cm-row', send, btn('Save', 'cm-btn-secondary', 'inbox-save', {
-            'data-id': x.ref
-        }), btn('Ask agent', 'cm-btn-ghost', 'inbox_ask', {
-            'data-id': x.ref,
-            title: "Ask the overview's agent to draft it"
-        }), el('span', 'cm-spacer'), btn('Done', 'cm-btn-ghost', 'inbox_done', {
-            'data-id': x.ref,
-            title: 'Nothing (more) to do'
-        }), btn('Ignore', 'cm-btn-ghost', 'inbox_ignore', {
-            'data-id': x.ref
-        })));
-    }
-    card.append(avatar, main);
-    return card;
-}
-function projectGrid(d) {
-    const grid = el('div', 'cm-grid');
-    for (const p of d.projects)grid.append(projectCard(d, p));
-    const add = el('button', 'cm-card cm-new-card', {
-        type: 'button',
-        'data-act': 'toggle-new'
-    }, '+ New project');
-    grid.append(add);
-    return grid;
-}
-function projectCard(d, p) {
-    const card = el('div', 'cm-card cm-project', {
-        'data-act': 'open-card',
-        'data-chat': p.chat || undefined,
-        title: p.chat ? 'Open the project' : undefined
-    });
-    const c = cover(p);
-    if (p.new_replies) c.append(div('cm-cover-badge', el('span', 'cm-status cm-status-new', {}, `${p.new_replies} new repl${p.new_replies === 1 ? 'y' : 'ies'}`)));
-    const counts = p.counts;
-    const summary = [
-        counts.review && `${counts.review} to review`,
-        counts.approved && `${counts.approved} approved`,
-        counts.published && `${counts.published} published`,
-        counts.failed && `${counts.failed} failed`
-    ].filter(Boolean);
-    const plats = el('div', 'cm-plats');
-    for (const id of p.platforms)plats.append(platformBadge(d.platforms, id, true));
-    const body = div('cm-project-body', div('cm-row', el('div', 'cm-project-title', p.chat ? {} : {
-        'data-edit-title': p.id,
-        title: 'Double-click to rename'
-    }, p.title), el('span', 'cm-spacer'), el('span', 'cm-status', {}, p.state)), steps(d.states, p.state));
-    if (p.chat) {
-        body.append(div('cm-row', ...p.brands.map(brandPill)), div('cm-row', el('span', 'cm-sub', {}, summary.join(' · ') || `${p.nfiles} file${p.nfiles === 1 ? '' : 's'}, no drafts yet`), el('span', 'cm-spacer'), plats));
-        const stats = statsRow(p.stats);
-        if (stats) body.append(stats);
-    } else {
-        body.append(...[
-            brandToggles(d.brands, p.brands, p.id),
-            p.brief ? el('div', 'cm-sub', {}, p.brief) : null,
-            div('cm-row', el('span', 'cm-sub', {}, `${p.nfiles} file${p.nfiles === 1 ? '' : 's'}`), el('span', 'cm-spacer'), btn('Start drafting', 'cm-btn-primary', 'start', {
-                'data-id': p.id,
-                disabled: p.brands.length === 0,
-                title: p.brands.length ? "Ask the overview's agent to start this project's chat" : 'Pick its brands first'
-            }))
-        ].filter(Boolean));
-    }
-    card.append(c, body);
-    return card;
-}
-function projectRegions(d, ui) {
-    const p = d.project;
-    const drafts = p.drafts;
-    return [
-        [
-            'top',
-            sig([
-                p.title,
-                p.state,
-                p.brands,
-                d.states
-            ]),
-            ()=>[
-                    projectTop(d, p)
-                ]
-        ],
-        [
-            'notice',
-            sig(d.notice),
-            ()=>d.notice ? [
-                    el('div', 'cm-notice', {}, d.notice)
-                ] : []
-        ],
-        [
-            'hero',
-            sig([
-                p.files.map((f)=>f.name),
-                p.brief,
-                p.links,
-                d.folder
-            ]),
-            ()=>[
-                    projectHero(d, p)
-                ]
-        ],
-        [
-            'drafts',
-            sig([
-                drafts,
-                ui.filter,
-                ui.marking,
-                ui.changing,
-                p.links
-            ]),
-            ()=>[
-                    draftSection(d, p, ui)
-                ]
-        ],
-        [
-            'replies',
-            sig(p.replies),
-            ()=>[
-                    replySection(d, p)
-                ]
-        ]
-    ];
-}
-function projectTop(d, p) {
-    const state = el('select', 'cm-select', {
-        name: 'state',
-        'data-id': p.id,
-        style: 'width:auto',
-        title: 'Move the project to another state'
-    });
-    for (const s of d.states){
-        const o = el('option', '', {
-            value: s
-        }, s);
-        o.selected = s === p.state;
-        state.append(o);
-    }
-    return div('cm-section', div('cm-top', btn('← Overview', 'cm-btn-ghost', 'overview'), el('span', 'cm-spacer'), state), div('cm-top', el('h1', 'cm-h1', {
-        'data-edit-title': p.id,
-        title: 'Double-click to rename'
-    }, p.title), ...p.brands.map(brandPill)), steps(d.states, p.state, true));
-}
-function projectHero(d, p) {
-    const media = p.files.find((f)=>f.video) || p.files.find((f)=>f.image);
-    const left = el('div', 'cm-card cm-panel');
-    left.append(el('div', 'cm-h2', {}, 'Material'));
-    if (media) {
-        const player = el('div', 'cm-player');
-        player.append(media.video ? el('video', '', {
-            src: media.url,
-            controls: true,
-            preload: 'metadata',
-            playsinline: true
-        }) : el('img', '', {
-            src: media.url,
-            alt: media.name
-        }));
-        left.append(player);
-    }
-    if (p.files.length) {
-        const files = el('div', 'cm-files');
-        for (const f of p.files)files.append(el('span', 'cm-file', {
-            title: f.name
-        }, f.name));
-        left.append(files);
-    } else left.append(el('div', 'cm-empty', {}, `No material yet: put it into ${d.folder}/${p.id}`));
-    const right = el('div', 'cm-card cm-panel');
-    const brief = el('textarea', 'cm-textarea', {
-        'data-save': 'brief',
-        'data-id': p.id,
-        'data-saved': p.brief,
-        placeholder: 'What it is about, what the posts should say'
-    });
-    brief.value = p.brief;
-    const linkInput = (key, placeholder)=>{
-        const v = p.links[key] || '';
-        const input = el('input', 'cm-input', {
-            type: 'url',
-            'data-save': 'link:' + key,
-            'data-id': p.id,
-            'data-saved': v,
-            placeholder
-        });
-        input.value = v;
-        return input;
-    };
-    right.append(el('div', 'cm-h2', {}, 'Brief'), brief, el('div', 'cm-h2', {}, 'Links'), div('cm-form-grid', linkInput('youtube', 'YouTube video: https://youtu.be/…'), linkInput('blog', 'Blog post: https://makie.org/…')), el('div', 'cm-hint', {}, 'Filled into the drafts that link to them. Publishing the YouTube video sets its link.'));
-    return div('cm-hero', left, right);
-}
-const FILTERS = [
-    [
-        'all',
-        'All'
-    ],
-    [
-        'review',
-        'To review'
-    ],
-    [
-        'approved',
-        'Approved'
-    ],
-    [
-        'published',
-        'Published'
-    ]
-];
-const inFilter = (f, x)=>f === 'all' || (f === 'review' ? [
-        'draft',
-        'changes',
-        'failed'
-    ].includes(x.status) : f === 'approved' ? [
-        'approved',
-        'publishing'
-    ].includes(x.status) : x.status === f);
-function draftSection(d, p, ui) {
-    const drafts = p.drafts.filter((x)=>inFilter(ui.filter, x));
-    const toApprove = p.drafts.filter((x)=>x.status === 'draft').length;
-    const readyToPublish = p.drafts.filter((x)=>x.status === 'approved' && x.publishes);
-    const filters = el('div', 'cm-filters');
-    for (const [k, label] of FILTERS){
-        const n = p.drafts.filter((x)=>inFilter(k, x)).length;
-        filters.append(el('button', 'cm-filter' + (ui.filter === k ? ' cm-filter-on' : ''), {
-            type: 'button',
-            'data-act': 'filter',
-            'data-value': k
-        }, `${label} ${n}`));
-    }
-    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Drafts'), filters, el('span', 'cm-spacer'), toApprove ? btn(`Approve all (${toApprove})`, 'cm-btn-secondary', 'approve_all', {
-        'data-id': p.id
-    }) : null, readyToPublish.length ? btn(`Publish approved automatic posts (${readyToPublish.length})`, 'cm-btn-primary', 'publish-all', {
-        'data-id': p.id,
-        title: 'Sends every approved post that has an automatic platform account. LinkedIn remains a deliberate manual copy-and-mark step.'
-    }) : null);
-    const grid = el('div', 'cm-drafts');
-    const order = d.platforms.map((x)=>x.id);
-    drafts.sort((a, b)=>order.indexOf(a.platform) - order.indexOf(b.platform) || a.id - b.id);
-    for (const x of drafts)grid.append(draftCard(d, p, x, ui));
-    const empty = !p.drafts.length ? el('div', 'cm-empty', {}, 'No drafts yet: the project chat writes them. Ask it in the chat beside this.') : !drafts.length ? el('div', 'cm-empty', {}, 'None here.') : null;
-    return div('cm-section', head, empty || grid);
-}
-function draftCard(d, p, x, ui) {
-    const color = platformColor(d.platforms, x.platform);
-    const card = el('div', 'cm-card cm-draft', {
-        'data-draft': x.id,
-        style: `--plat:${color}`
-    });
-    card.append(div('cm-draft-head', platformBadge(d.platforms, x.platform), div('cm-draft-who', el('span', 'cm-draft-name', {}, platformName(d.platforms, x.platform)), el('span', 'cm-draft-meta', {}, `${x.brand} · ${x.kind} · #${x.id} · ${x.updated}`)), el('span', `cm-status cm-status-${x.status}`, {}, x.status)));
-    const body = el('div', 'cm-draft-body');
-    if (x.title) body.append(el('div', 'cm-draft-title', {}, x.title));
-    const out = [
-        'publishing',
-        'published'
-    ].includes(x.status);
-    const text = el('div', 'cm-draft-text', {
-        'data-raw': x.text,
-        'data-editable': out ? undefined : true,
-        title: out ? undefined : 'Double-click to edit'
-    });
-    text.append(...linkified(x.text));
-    body.append(text);
-    const ratio = x.chars / x.max;
-    const meter = el('div', 'cm-meter' + (ratio > 1 ? ' cm-meter-over' : ratio > 0.9 ? ' cm-meter-warn' : ''), {
-        title: `${x.chars} of ${x.max} characters`
-    });
-    meter.append(el('div', '', {
-        style: `width:${Math.min(100, ratio * 100).toFixed(1)}%`
-    }));
-    body.append(meter);
-    if (x.media.length) {
-        const f = el('div', 'cm-files');
-        for (const m of x.media)f.append(el('span', 'cm-file', {}, m));
-        body.append(f);
-    }
-    if (x.note) body.append(el('div', 'cm-callout' + (x.status === 'published' ? ' cm-callout-info' : ''), {}, x.status === 'changes' ? `Changes asked: ${x.note}` : x.note));
-    if (x.posts.length) {
-        const posted = el('div', 'cm-posted');
-        const original = x.posts.find((q)=>q.kind === 'original');
-        if (original) {
-            const a = el('a', '', {
-                href: original.url,
-                target: '_blank',
-                rel: 'noopener'
-            }, '↗ ' + original.url);
-            posted.append(a);
-        }
-        const reposts = x.posts.filter((q)=>q.kind === 'repost').length;
-        if (reposts) posted.append(el('span', 'cm-sub', {}, `reposted by ${reposts} account${reposts === 1 ? '' : 's'}`));
-        const stats = statsRow(x.stats);
-        if (stats) posted.append(stats);
-        body.append(posted);
-    }
-    card.append(body);
-    const foot = el('div', 'cm-draft-foot');
-    if (ui.changing === x.id) {
-        const box = div('cm-row', el('input', 'cm-input', {
-            name: 'note',
-            type: 'text',
-            placeholder: 'What should change? (Enter sends it to the project chat)'
-        }), btn('Send', 'cm-btn-primary', 'changes', {
-            'data-id': x.id
-        }), btn('Cancel', 'cm-btn-ghost', 'cancel'));
-        box.setAttribute('data-box', `changes-${x.id}`);
-        box.style.width = '100%';
-        foot.append(box);
-    } else if (ui.marking === x.id) {
-        const box = div('cm-row', el('input', 'cm-input', {
-            name: 'url',
-            type: 'url',
-            placeholder: 'Link to the post'
-        }), btn('Mark published', 'cm-btn-primary', 'mark', {
-            'data-id': x.id
-        }), btn('Cancel', 'cm-btn-ghost', 'cancel'));
-        box.setAttribute('data-box', `mark-${x.id}`);
-        box.style.width = '100%';
-        foot.append(box);
-    } else if (x.status === 'draft' || x.status === 'changes') {
-        foot.append(btn('Approve', 'cm-btn-primary', 'approve', {
-            'data-num': x.id
-        }), btn('Request changes', 'cm-btn-secondary', 'changes-open', {
-            'data-id': x.id
-        }), btn('Edit', 'cm-btn-ghost', 'edit', {
-            'data-id': x.id
-        }), el('span', 'cm-spacer'), btn('Remove', 'cm-btn-ghost', 'remove', {
-            'data-num': x.id
-        }));
-    } else if (x.status === 'approved') {
-        if (x.publishes) {
-            const why = x.needs_links.length ? `Set the project's ${x.needs_links.join(' and ')} link first` : !x.has_account ? `No ${platformName(d.platforms, x.platform)} account posts for ${x.brand}: add one in the overview` : '';
-            foot.append(btn('Publish', 'cm-btn-primary', 'publish', {
-                'data-num': x.id,
-                disabled: !!why,
-                title: why || 'Publish now, then repost with the other accounts'
-            }));
-            if (why) foot.append(el('span', 'cm-hint', {}, why));
-        } else {
-            const [post, comment] = x.final_text.split(/\n---\n/);
-            const manualText = x.platform === 'discourse' && x.title ? `${x.title}\n\n${post}` : post;
-            foot.append(btn('Copy text', 'cm-btn-primary', 'copy', {
-                'data-value': manualText.trim(),
-                title: `Copy, then post it on ${platformName(d.platforms, x.platform)}`
-            }));
-            if (comment) foot.append(btn('Copy comment', 'cm-btn-secondary', 'copy', {
-                'data-value': comment.trim()
-            }));
-            foot.append(btn('Mark published', 'cm-btn-secondary', 'mark-open', {
-                'data-id': x.id
-            }));
-        }
-        foot.append(el('span', 'cm-spacer'), btn('Back to draft', 'cm-btn-ghost', 'unapprove', {
-            'data-num': x.id
-        }));
-    } else if (x.status === 'publishing') {
-        foot.append(el('span', 'cm-sub', {}, 'Publishing…'));
-    } else if (x.status === 'failed') {
-        foot.append(btn('Retry', 'cm-btn-primary', 'retry', {
-            'data-num': x.id
-        }), btn('Edit', 'cm-btn-ghost', 'edit', {
-            'data-id': x.id
-        }));
-    } else if (x.status === 'published') {
-        const original = x.posts.find((q)=>q.kind === 'original');
-        if (original) foot.append(el('a', 'cm-btn cm-btn-sm cm-btn-secondary', {
-            href: original.url,
-            target: '_blank',
-            rel: 'noopener'
-        }, 'View post'));
-    }
-    card.append(foot);
-    return card;
-}
-function replySection(d, p) {
-    const open = p.replies.filter((r)=>r.status === 'new' || r.status === 'drafted');
-    const head = div('cm-section-head', el('div', 'cm-h2', {}, 'Replies'), el('span', 'cm-sub', {}, p.replies.length ? `${open.length} open of ${p.replies.length}` : ''), el('span', 'cm-spacer'), open.length ? btn('Draft answers', 'cm-btn-secondary', 'ask_answers', {
-        title: "Ask this project's agent to draft answers to the open replies"
-    }) : null);
-    if (!p.replies.length) return div('cm-section', head, el('div', 'cm-empty', {}, 'Replies to the published Bluesky and Mastodon posts show up here.'));
-    const list = el('div', 'cm-replies');
-    for (const r of p.replies)list.append(replyCard(d, r));
-    return div('cm-section', head, list);
-}
-function replyCard(d, r) {
-    const card = el('div', 'cm-card cm-reply', {
-        style: `--plat:${platformColor(d.platforms, r.platform)}`,
-        'data-box': `reply-${r.ref}`
-    });
-    const avatar = el('div', 'cm-avatar', {}, (r.author_name || r.author).slice(0, 1).toUpperCase());
-    const main = el('div', 'cm-section');
-    main.style.gap = '6px';
-    main.append(div('cm-row', el('strong', '', {}, r.author_name), el('span', 'cm-sub', {}, `@${r.author} · ${r.when}`), platformBadge(d.platforms, r.platform, true), el('span', 'cm-spacer'), el('span', `cm-status cm-status-${r.status}`, {}, r.status)), el('div', 'cm-reply-text', {}, r.text), el('a', 'cm-sub', {
-        href: r.url,
-        target: '_blank',
-        rel: 'noopener'
-    }, 'View on ' + platformName(d.platforms, r.platform) + ' ↗'));
-    if (r.status === 'answered') {
-        main.append(div('cm-answer', el('div', 'cm-sub', {}, 'Answered:'), el('div', 'cm-reply-text', {}, r.answer)));
-    } else if (r.status !== 'ignored') {
-        const answer = el('textarea', 'cm-textarea', {
-            name: 'answer',
-            placeholder: 'Your answer…'
-        });
-        answer.value = r.answer;
-        answer.style.minHeight = '60px';
-        main.append(answer, div('cm-row', btn('Send', 'cm-btn-primary', 'send', {
-            'data-id': r.ref,
-            title: 'Send this answer now'
-        }), btn('Save', 'cm-btn-secondary', 'save-answer', {
-            'data-id': r.ref
-        }), btn('Ask agent', 'cm-btn-ghost', 'ask_answer', {
-            'data-id': r.ref,
-            title: "Ask this project's agent to draft it"
-        }), el('span', 'cm-spacer'), btn('Ignore', 'cm-btn-ghost', 'ignore', {
-            'data-id': r.ref
-        })));
-    }
-    card.append(avatar, main);
-    return card;
-}
-export { connect as connect };
+export { DashboardController as DashboardController };
 

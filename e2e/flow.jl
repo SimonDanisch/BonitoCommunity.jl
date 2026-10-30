@@ -103,6 +103,7 @@ try
     # Exercise first-use PIN setup through the real dashboard, including the
     # modal's visible inputs and its submit action.
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
+    TK.wait_for(s, "the initial account setup", "!!document.querySelector('[data-act=set-pin]')"; timeout = 10)
     js(s, "document.querySelector('[data-act=set-pin]').click(); true")
     TK.wait_for(s, "the PIN dialog inputs", "document.querySelectorAll('.cm-pin-dialog[open] input').length === 2"; timeout = 10)
     @test js(s, "document.querySelector('.cm-pin-dialog input').getBoundingClientRect().height > 0")
@@ -151,6 +152,9 @@ try
     @test js(s, "document.querySelectorAll('.cm-link-chip').length") >= 3
     js(s, "document.querySelector('.cm-drafts').scrollIntoView(); true")
     shot(s, "5-drafts")
+    # Stable item/region identities: reviewing one card must preserve the
+    # material player and another card, including unsaved browser input.
+    js(s, "document.querySelector('.cm-player video').dataset.preserve = 'player'; document.querySelectorAll('.cm-drafts .cm-draft')[2].dataset.preserve = 'card'; true")
 
     # approve the YouTube draft, send the TikTok one back with a note
     yt = CM.project_drafts(app.state[], P)[1].id
@@ -167,6 +171,8 @@ try
     end
     @test CM.find_draft(app, yt).status == "approved"
     @test CM.find_draft(app, tt).status == "changes"
+    @test js(s, "document.querySelector('.cm-player video').dataset.preserve") == "player"
+    @test js(s, "!!document.querySelector('.cm-drafts .cm-draft[data-preserve=card]')")
     # and the cards say so
     TK.wait_for(s, "the YouTube card approved",
         "document.querySelector('[data-draft=\"$yt\"] .cm-status')?.textContent === 'approved'"; timeout = 10)
