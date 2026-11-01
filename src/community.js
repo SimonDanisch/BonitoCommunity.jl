@@ -1,12 +1,13 @@
 // Julia renders the DOM; this instance handles browser-only interactions.
 export class DashboardController {
-    constructor(root, dialog, pinOpen, actions, feedback) {
+    constructor(root, dialog, pinOpen, actions, feedback, uiState) {
         this.root = root; this.dialog = dialog; this.pinOpen = pinOpen; this.actions = actions;
         const redirect = () => root.querySelectorAll('[data-youtube-redirect]').forEach(n => n.value = location.origin + '/community-youtube-callback');
         redirect();
         this.redirectObserver = new MutationObserver(redirect);
         this.redirectObserver.observe(root, {childList:true, subtree:true});
         this.ui = {showNew: false, showAccounts: false, showHandled: false, showBrands: false};
+        uiState.on(state => Object.assign(this.ui, state));
         root.addEventListener('click', e => this.click(e));
         root.addEventListener('change', e => { if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value); });
         root.addEventListener('focusout', e => this.save(e.target));
@@ -113,9 +114,12 @@ export class DashboardController {
             case 'cancel': return this.view({marking: null, changing: null});
             case 'create': {
                 const title = box.querySelector('[name=title]').value.trim();
+                const brands = this.checked(box), error = box.querySelector('[data-create-error]');
+                error.textContent = !title ? 'Enter a project title.' : !brands.length ? 'Choose at least one brand below the title.' : '';
+                error.hidden = !error.textContent;
                 if (!title) return box.querySelector('[name=title]').focus();
-                this.send('new', null, {title, brands: this.checked(box), brief: box.querySelector('[name=brief]').value});
-                return this.view({showNew: false});
+                if (!brands.length) return box.querySelector('[data-act=brand]')?.focus();
+                return this.send('new', null, {title, brands, brief: box.querySelector('[name=brief]').value});
             }
             case 'brand': {
                 b.classList.toggle('cm-on'); const group = b.closest('[data-brands]');

@@ -3,7 +3,7 @@
 // This code was bundled using `deno bundle` and it's not recommended to edit it manually
 
 class DashboardController {
-    constructor(root, dialog, pinOpen, actions, feedback){
+    constructor(root, dialog, pinOpen, actions, feedback, uiState){
         this.root = root;
         this.dialog = dialog;
         this.pinOpen = pinOpen;
@@ -21,6 +21,7 @@ class DashboardController {
             showHandled: false,
             showBrands: false
         };
+        uiState.on((state)=>Object.assign(this.ui, state));
         root.addEventListener('click', (e)=>this.click(e));
         root.addEventListener('change', (e)=>{
             if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value);
@@ -228,14 +229,15 @@ class DashboardController {
             case 'create':
                 {
                     const title = box.querySelector('[name=title]').value.trim();
+                    const brands = this.checked(box), error = box.querySelector('[data-create-error]');
+                    error.textContent = !title ? 'Enter a project title.' : !brands.length ? 'Choose at least one brand below the title.' : '';
+                    error.hidden = !error.textContent;
                     if (!title) return box.querySelector('[name=title]').focus();
-                    this.send('new', null, {
+                    if (!brands.length) return box.querySelector('[data-act=brand]')?.focus();
+                    return this.send('new', null, {
                         title,
-                        brands: this.checked(box),
+                        brands,
                         brief: box.querySelector('[name=brief]').value
-                    });
-                    return this.view({
-                        showNew: false
                     });
                 }
             case 'brand':

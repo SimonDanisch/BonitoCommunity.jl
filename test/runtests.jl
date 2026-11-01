@@ -63,6 +63,26 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test Set(p["id"] for p in data["platforms"]) == Set(CM.platform_id.(CM.PLATFORMS))
         @test only(filter(p -> p["id"] == "discourse", data["platforms"]))["color"] == "#9558b2"
     end
+    @testset "new project form closes only after successful creation" begin
+        form_server, form_app, _ = test_server()
+        dashboard = CM.Dashboard(form_app, nothing, "")
+        dashboard.ui[] = merge(dashboard.ui[], Dict("showNew" => true))
+        tab = (; feedback=dashboard.feedback, navigate=dashboard.navigate)
+        payload = Dict{String,Any}("title"=>"Preserved project", "brands"=>String[], "brief"=>"Keep my writing")
+        CM.pane_action!(dashboard, tab, "new", nothing, payload)
+        @test dashboard.ui[]["showNew"]
+        @test occursin("at least one brand", dashboard.feedback[])
+        @test isempty(form_app.state[].projects)
+        payload["brands"] = ["Bonito"]
+        CM.pane_action!(dashboard, tab, "new", nothing, payload)
+        @test !dashboard.ui[]["showNew"] && isempty(dashboard.feedback[])
+        @test only(form_app.state[].projects).brief == "Keep my writing"
+        dashboard.ui[] = merge(dashboard.ui[], Dict("showNew"=>true))
+        CM.pane_action!(dashboard, tab, "new", nothing, payload)
+        @test dashboard.ui[]["showNew"] && occursin("already a project", dashboard.feedback[])
+        close(dashboard)
+        form_app.poller === nothing || close(form_app.poller)
+    end
     @testset "worker project paths are independent of server state" begin
         p = CM.Project("release", "Release", ["Bonito"], "", "new", now(UTC), "")
         @test CM.project_worker_folder((projects_root="/home/worker/projects", name="Worker"), p) == "/home/worker/projects/BonitoCommunity/release"

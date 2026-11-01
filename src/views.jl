@@ -157,8 +157,10 @@ function brands_view(data)
 end
 
 function new_project_view(d)
-    box("cm-card cm-panel", label("New project"), input("title", "Title, e.g. BonitoAgents release"), brands_toggle(d["brands"], String[]),
+    box("cm-card cm-panel", label("New project"), input("title", "Title, e.g. BonitoAgents release"),
+        label("Brands · choose at least one"), brands_toggle(d["brands"], String[]),
         node("textarea", "cm-textarea"; name = "brief", placeholder = "What it is about, what the posts should say"),
+        box("cm-callout", ""; dataCreateError=true, hidden=true, role="alert"),
         hint("Creates a folder in $(d["folder"])."), box("cm-row", button("Create project", "create"; kind = "primary"), button("Cancel", "toggle-new"; kind = "ghost")); dataBox = "new")
 end
 function cover_view(p)

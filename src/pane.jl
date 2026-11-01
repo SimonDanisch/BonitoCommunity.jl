@@ -58,7 +58,7 @@ function Bonito.jsrender(session::Bonito.Session, d::Dashboard)
     end
     root = dashboard_dom(session, d)
     pin = pin_dialog(d.pin_open)
-    connect = js"""$(CommunityLib).then(lib => new lib.DashboardController($(root), $(pin), $(d.pin_open), $(d.actions), $(d.feedback)))"""
+    connect = js"""$(CommunityLib).then(lib => new lib.DashboardController($(root), $(pin), $(d.pin_open), $(d.actions), $(d.feedback), $(d.ui)))"""
     return Bonito.jsrender(session, DOM.div(AppUIStyles, CommunityStyles, root, pin, connect; class = "cm-dash-wrap"))
 end
 
@@ -223,7 +223,11 @@ pane_action!(d::Dashboard, ::Val{:save_brand}, original::AbstractString, v::Abst
 pane_action!(d::Dashboard, ::Val{:delete_brand}, original::AbstractString, ::Nothing) =
     save_brand!(d.app, original, "", String[], ""; remove=true)
 
-pane_action!(d::Dashboard, ::Val{:new}, ::Nothing, v::AbstractDict) = new_project!(d.app, v["title"], v["brands"], v["brief"])
+function pane_action!(d::Dashboard, ::Val{:new}, ::Nothing, v::AbstractDict)
+    project = new_project!(d.app, v["title"], v["brands"], v["brief"])
+    d.ui[] = merge(d.ui[], Dict("showNew" => false))
+    return project
+end
 pane_action!(d::Dashboard, ::Val{:rescan}, ::Nothing, ::Nothing) = scan_projects!(d.app)
 pane_action!(d::Dashboard, ::Val{:open}, chat_id::AbstractString, ::Nothing) = show_chat!(d.view, chat_id)
 
