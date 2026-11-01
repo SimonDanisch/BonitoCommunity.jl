@@ -168,6 +168,11 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test BT.app_chat(server, app).id == "c1"           # the project chat is not the app's chat
         @test occursin("Bluesky (≤ 300 chars)", call(server, chat, "project_info"))
         @test occursin("community project `$(p.id)`", BT.app_prompt_appendix(server, chat))
+        @test occursin(p.brief, BT.app_prompt_appendix(server, chat))
+        @test occursin("not in a workspace file", BT.app_prompt_appendix(server, chat))
+        CM.set_project!(app, p.id; brief="Updated dashboard brief https://discourse.julialang.org/t/example/123")
+        @test occursin("Updated dashboard brief https://discourse.julialang.org/t/example/123", BT.app_prompt_appendix(server, chat))
+        CM.set_project!(app, p.id; brief=p.brief)
         @test occursin("Community app's overview", BT.app_prompt_appendix(server, overview))
     end
 

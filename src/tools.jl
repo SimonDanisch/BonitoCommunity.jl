@@ -89,10 +89,34 @@ That chat writes the drafts; you don't write them here. Keep your answers
 short: the pane shows the outcome.
 """
 
+"The dashboard's authoritative project context, also supplied to chats with no material files."
+function project_chat_context(app::CommunityApp, p::Project)
+    links = isempty(p.links) ? "No separate links set; also use any links in the brief." :
+        join(("$key: $url" for (key, url) in sort!(collect(p.links); by=first)), "\n")
+    return """
+    ## Project context from the Community dashboard
+    Title: $(p.title)
+    Brands: $(join(p.brands, ", "))
+
+    Brief:
+    $(isempty(p.brief) ? "No brief entered yet." : p.brief)
+
+    Links:
+    $links
+
+    The brief and links are stored by Community, not in a workspace file.
+    Call `project_info` first to read the latest brief, links, brand instructions
+    and existing drafts. An empty material folder is valid for text announcements;
+    it does not mean the brief is missing. Save drafts with `project_draft`, then
+    call `project_submit` to put them in the dashboard for review.
+    """
+end
+
 function BonitoAgents.app_briefing(app::CommunityApp, key::AbstractString)
     isempty(key) && return BonitoAgents.app_briefing(app)
     startswith(key, PROJECT_KEY) || return ""
     id = key[length(PROJECT_KEY)+1:end]
+    p = find_project(app, id)
     return """
     # Community project $id
 
@@ -101,6 +125,8 @@ function BonitoAgents.app_briefing(app::CommunityApp, key::AbstractString)
     brief, material, your drafts and the replies to its published posts. The
     user approves, edits or sends back drafts there and publishes them; you
     never publish or send anything.
+
+    $(project_chat_context(app, p))
 
     - `project_info`: the brief, the brands and their platforms, what each
       platform gets and its limits, the drafts so far and the user's notes.
@@ -168,8 +194,9 @@ function BonitoAgents.call_tool(app::CommunityApp, ::Val{:cm_start_project_chat}
     worker = find_worker(call.server, owner, call.caller.worker_id)
     worker === nothing && throw(AppError("this chat's worker is gone"))
     folder = prepare_project_worker!(app, worker, p)
+    initial_prompt = project_chat_context(app, p) * "\n\n## Drafting task\n" * prompt
     chat = start_chat!(call.server, owner, worker, folder;
-                       title = p.title, prompt, app, key = project_key(p))
+                       title = p.title, prompt = initial_prompt, app, key = project_key(p))
     set_project!(app, p.id; chat = chat.id, state = p.state == "new" ? "drafting" : p.state)
     return "Started chat \"$(chat.title[])\" ($(chat.id)) for project $(p.id)."
 end
