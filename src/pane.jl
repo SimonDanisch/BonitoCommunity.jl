@@ -5,10 +5,13 @@
 function BonitoAgents.chat_pane(app::CommunityApp, view)
     key = chat_key(view)
     project = startswith(key, PROJECT_KEY) ? key[length(PROJECT_KEY)+1:end] : ""
-    return (ChatHeader(view),
-            DOM.div(Dashboard(app, view, project),
-                    DOM.div(ChatNotice(view), ChatTranscript(view), ChatComposer(view), ChatToolbar(); class = "cm-chat");
-                    class = "cm-split"))
+    return (ChatHeader(view), Dashboard(app, view, project))
+end
+
+function community_layout(project::AbstractString)
+    panels = isempty(project) ? ("projects", "inbox") : ("drafts", "brief", "material", "replies")
+    BonitoWidgets.workspacelayout(BonitoWidgets.hsplit(
+        BonitoWidgets.tabgroup(panels...), BonitoWidgets.tabgroup("chat"); fractions=[0.6, 0.4]))
 end
 
 """
@@ -29,15 +32,16 @@ struct Dashboard{V}
     feedback::Observable{String}
     navigate::Observable{String}
     pin_open::Observable{Bool}
+    layout::Observable{Dict{String,Any}}
 end
 Dashboard(app, view, project) = Dashboard(app, view, project,
     Observable(Dict{String,Any}("filter" => "all", "showNew" => false, "showAccounts" => false,
                                "showHandled" => false, "marking" => nothing, "changing" => nothing,
                                "youtube_state" => "", "youtube_url" => "", "showBrands" => false)),
-    Observable{Any}(nothing), Observable(""), Observable(""), Observable(false))
+    Observable{Any}(nothing), Observable(""), Observable(""), Observable(false), Observable(community_layout(project)))
 
 function Base.close(d::Dashboard)
-    foreach(Bonito.Observables.clear, (d.ui, d.actions, d.feedback, d.navigate, d.pin_open))
+    foreach(Bonito.Observables.clear, (d.ui, d.actions, d.feedback, d.navigate, d.pin_open, d.layout))
 end
 
 const CommunityLib = Bonito.ES6Module(joinpath(@__DIR__, "community.js"))
@@ -58,7 +62,8 @@ function Bonito.jsrender(session::Bonito.Session, d::Dashboard)
     end
     root = dashboard_dom(session, d)
     pin = pin_dialog(d.pin_open)
-    connect = js"""$(CommunityLib).then(lib => new lib.DashboardController($(root), $(pin), $(d.pin_open), $(d.actions), $(d.feedback), $(d.ui)))"""
+    layout_key = isempty(d.project) ? "community-overview-layout-v1" : "community-project-layout-v1"
+    connect = js"""$(CommunityLib).then(lib => new lib.DashboardController($(root), $(pin), $(d.pin_open), $(d.actions), $(d.feedback), $(d.ui), $(d.layout), $(layout_key)))"""
     return Bonito.jsrender(session, DOM.div(AppUIStyles, CommunityStyles, root, pin, connect; class = "cm-dash-wrap"))
 end
 
@@ -153,6 +158,7 @@ function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
     app = d.app
     platforms = [platform_data(pl) for pl in PLATFORMS]
     base = Dict{String,Any}(
+        "project_navigation" => [Dict("title"=>p.title, "chat"=>p.chat) for p in s.projects if !isempty(p.chat)],
         "brands" => brand_names(app), "states" => collect(PROJECT_STATES), "notice" => notice,
         "brand_details" => [Dict("name"=>b.name, "platforms"=>b.platforms, "notes"=>b.notes, "in_use"=>brand_in_use(app,b.name)) for b in app.settings.brands],
         "platforms" => platforms, "folder" => projects_dir(app),
@@ -353,22 +359,30 @@ const CommunityStyles = Styles(
     CSS(".cm-dash-wrap, .cm-pin-dialog", "font-family" => "var(--bw-font)",
         "font-size" => "var(--bw-font-size)", "line-height" => "1.5"),
     CSS(".cm-split", "flex" => "1 1 auto", "min-height" => "0", "display" => "flex"),
-    CSS(".cm-dash-wrap", "flex" => "3 1 0", "min-width" => "0", "overflow-y" => "auto",
-        "border-right" => "1px solid var(--bw-border)", "background" => "var(--bw-bg)"),
-    CSS(".cm-chat", "flex" => "2 1 0", "min-width" => "340px", "max-width" => "640px", "min-height" => "0",
-        "display" => "flex", "flex-direction" => "column"),
-    CSS("@media (max-width: 1000px)",
-        CSS(".cm-split", "flex-direction" => "column"),
-        CSS(".cm-dash-wrap", "flex" => "0 1 auto", "max-height" => "60%", "border-right" => "none",
-            "border-bottom" => "1px solid var(--bw-border)"),
-        CSS(".cm-chat", "max-width" => "none", "min-width" => "0")),
+    CSS(".cm-dash-wrap", "flex" => "1 1 0", "min-width" => "0", "min-height" => "0", "display" => "flex",
+        "overflow" => "hidden", "background" => "var(--bw-bg)"),
+    CSS(".cm-chat", "flex" => "1 1 0", "min-width" => "0", "min-height" => "0",
+        "display" => "flex", "flex-direction" => "column", "overflow" => "hidden"),
+    CSS(".cm-workspace-scroll", "flex" => "1 1 0", "min-height" => "0", "min-width" => "0",
+        "overflow-y" => "auto", "overflow-x" => "hidden", "padding" => "16px", "display" => "flex",
+        "flex-direction" => "column", "gap" => "16px", "box-sizing" => "border-box"),
 
     CSS(".cm-region:empty", "display" => "none"),
     CSS(".cm-region", "display" => "contents"),
     CSS("[data-edit-title][contenteditable='plaintext-only']", "outline" => "none", "border-radius" => "6px",
         "box-shadow" => "0 0 0 2px var(--bw-accent)"),
-    CSS(".cm-dash", "padding" => "20px 24px 32px", "display" => "flex", "flex-direction" => "column",
-        "gap" => "20px", "max-width" => "1180px", "margin" => "0 auto", "color" => "var(--bw-text)"),
+    CSS(".cm-dash", "padding" => "12px", "display" => "flex", "flex-direction" => "column",
+        "flex" => "1 1 0", "min-height" => "0", "min-width" => "0", "gap" => "12px", "color" => "var(--bw-text)"),
+    CSS(".cm-dash > .bw-ws", "flex" => "1 1 0", "min-height" => "0"),
+    CSS(".cm-top > select", "width" => "auto", "max-width" => "100%", "min-width" => "0"),
+    CSS(".cm-empty", "overflow-wrap" => "anywhere"),
+    CSS(".cm-workspace-scroll textarea[name=brief]", "min-height" => "260px"),
+    CSS("@media (max-width: 700px)",
+        CSS(".cm-dash", "padding" => "6px", "gap" => "6px"),
+        CSS(".cm-workspace-scroll", "padding" => "10px"),
+        CSS(".cm-project-heading h1", "display" => "none"),
+        CSS(".cm-dash .cm-drafts, .cm-dash .cm-grid, .cm-dash .cm-platform-grid, .cm-dash .cm-form-grid", "grid-template-columns" => "minmax(0, 1fr)"),
+        CSS(".cm-h1", "font-size" => "var(--bw-font-size-lg)")),
     CSS(".cm-top", "display" => "flex", "align-items" => "center", "gap" => "12px", "flex-wrap" => "wrap"),
     CSS(".cm-h1", "font-size" => "var(--bw-font-size-xl)", "font-weight" => "650", "margin" => "0", "letter-spacing" => "-0.01em"),
     CSS(".cm-h2", "font-size" => "var(--bw-font-size-ui)", "font-weight" => "600", "margin" => "0", "text-transform" => "uppercase",

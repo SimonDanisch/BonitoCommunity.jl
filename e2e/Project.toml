@@ -1,5 +1,5 @@
-# Browser walkthrough against the shared-controls feature branch. Local
-# development can override these sources with Pkg.develop (ignored Manifest).
+# Browser walkthrough against BonitoAgents main. Local development can override
+# these sources with Pkg.develop (ignored Manifest).
 [deps]
 AgentClientProtocol = "a1b2c3d4-1234-5678-abcd-a1b2c3d4e5f6"
 AgentProviders = "c3d4e5f6-7a8b-49c0-b1d2-e3f4a5b6c7d8"
@@ -8,6 +8,7 @@ Bonito = "824d6782-a2ef-11e9-3a09-e5662e0c26f8"
 BonitoAgents = "f4e5b6c7-8901-4a2b-9c3d-4e5f6a7b8c9d"
 BonitoCommunity = "4c5af91b-b856-41fb-93f5-384ee8ea9157"
 BonitoMCP = "4a1c91af-1c90-46a4-8594-a3846516869d"
+BonitoWidgets = "62a4b9e4-7ee6-4bfa-b661-80bcb0a47665"
 BonitoWorker = "98909ed9-6989-4829-81af-73688ee23085"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 ElectronCall = "8ddd578f-0c94-4c64-8c65-f083f291b266"
@@ -21,14 +22,15 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 WorkerLink = "03840273-e5e6-4e74-9050-e95881fcd827"
 
 [sources]
+AgentClientProtocol = {rev = "main", subdir = "AgentClientProtocol", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}
+AgentProviders = {rev = "main", subdir = "AgentProviders", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}
 Bonito = {rev = "sd/media-proxy", url = "https://github.com/SimonDanisch/Bonito.jl.git"}
-BonitoAgents = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoAgents"}
+BonitoAgents = {rev = "main", subdir = "BonitoAgents", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}
 BonitoCommunity = {path = ".."}
-BonitoMCP = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoMCP"}
-BonitoWorker = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoWorker"}
+BonitoMCP = {rev = "main", subdir = "BonitoMCP", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}
+BonitoWidgets = {rev = "main", url = "https://github.com/SimonDanisch/BonitoWidgets.jl.git"}
+BonitoWorker = {rev = "main", subdir = "BonitoWorker", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}
 ElectronCall = {rev = "sd/testsuite", url = "https://github.com/IanButterworth/ElectronCall.jl.git"}
-MockACP = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "BonitoAgents/test/MockACP"}
-AgentClientProtocol = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "AgentClientProtocol"}
-AgentProviders = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "AgentProviders"}
-RemoteSync = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "RemoteSync"}
-WorkerLink = {url = "https://github.com/SimonDanisch/BonitoAgents.jl.git", rev = "main", subdir = "WorkerLink"}
+MockACP = {rev = "main", subdir = "BonitoAgents/test/MockACP", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}
+RemoteSync = {rev = "main", subdir = "RemoteSync", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}
+WorkerLink = {rev = "main", subdir = "WorkerLink", url = "https://github.com/SimonDanisch/BonitoAgents.jl.git"}

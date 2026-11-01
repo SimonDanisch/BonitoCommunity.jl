@@ -1,6 +1,6 @@
 // Julia renders the DOM; this instance handles browser-only interactions.
 export class DashboardController {
-    constructor(root, dialog, pinOpen, actions, feedback, uiState) {
+    constructor(root, dialog, pinOpen, actions, feedback, uiState, layout, layoutKey) {
         this.root = root; this.dialog = dialog; this.pinOpen = pinOpen; this.actions = actions;
         const redirect = () => root.querySelectorAll('[data-youtube-redirect]').forEach(n => n.value = location.origin + '/community-youtube-callback');
         redirect();
@@ -8,8 +8,38 @@ export class DashboardController {
         this.redirectObserver.observe(root, {childList:true, subtree:true});
         this.ui = {showNew: false, showAccounts: false, showHandled: false, showBrands: false};
         uiState.on(state => Object.assign(this.ui, state));
+        // Workspace handles mobile tab presentation without changing the saved
+        // desktop splits. Persist arrangement only; never form contents/secrets.
+        const serializeLayout = value => JSON.stringify(value, (_key, item) =>
+            ArrayBuffer.isView(item) ? Array.from(item) : item);
+        const defaults = JSON.parse(serializeLayout(layout.value));
+        this.resetLayout = () => layout.notify(structuredClone(defaults));
+        const mobile = window.matchMedia('(max-width: 700px)');
+        const storageKey = () => layoutKey + (mobile.matches ? '-mobile' : '');
+        const panelIds = tree => tree.type === 'tabs' ? tree.panels : tree.children.flatMap(panelIds);
+        const expected = panelIds(defaults.root).sort();
+        const restoreLayout = () => {
+            let next = structuredClone(defaults);
+            try {
+                const saved = JSON.parse(localStorage.getItem(storageKey()) || 'null');
+                if (saved) {
+                    const ids = [...panelIds(saved.root), ...saved.floating.map(x => x.panel)].sort();
+                    if (JSON.stringify(ids) === JSON.stringify(expected)) next = saved;
+                }
+            } catch (error) { console.warn('Could not restore Community layout', error); }
+            layout.notify(next);
+        };
+        restoreLayout();
+        mobile.addEventListener('change', () => requestAnimationFrame(restoreLayout));
+        layout.on(value => {
+            try { localStorage.setItem(storageKey(), serializeLayout(value)); }
+            catch (error) { console.warn('Could not save Community layout', error); }
+        });
         root.addEventListener('click', e => this.click(e));
-        root.addEventListener('change', e => { if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value); });
+        root.addEventListener('change', e => {
+            if (e.target.matches('[name=state]')) this.send('state', e.target.dataset.id, e.target.value);
+            if (e.target.matches('[name=project_chat]')) this.send('open', e.target.value);
+        });
         root.addEventListener('focusout', e => this.save(e.target));
         root.addEventListener('keydown', e => {
             if (e.key === 'Enter' && e.target.matches('input[data-save]')) e.target.blur();
@@ -101,6 +131,7 @@ export class DashboardController {
         const b = e.target.closest('[data-act]'); if (!b || b.disabled) return;
         e.stopPropagation(); const a = b.dataset.act, id = b.dataset.id ?? null, num = Number(b.dataset.num ?? id), box = b.closest('[data-box]');
         switch (a) {
+            case 'reset-layout': return this.resetLayout();
             case 'toggle-brands': return this.view({showBrands:!this.ui.showBrands, showAccounts:false, showNew:false});
             case 'save-brand': return this.send('save_brand', id, {name:box.querySelector('[name=brand_name]').value.trim(), notes:box.querySelector('[name=brand_notes]').value,
                 platforms:[...box.querySelectorAll('[name=brand_platform]:checked')].map(n=>n.value)});

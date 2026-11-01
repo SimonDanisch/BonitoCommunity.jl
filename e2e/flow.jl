@@ -15,10 +15,12 @@ const CM = BonitoCommunity
     token == "e2e-only-token" ? nothing : throw(AppError("invalid test token"))
 include(joinpath(pkgdir(BonitoAgents), "test", "testkit", "TestKit.jl"))
 const TK = TestKit
+ENV["MOCK_AGENT_ACP"] = joinpath(@__DIR__, "mock-agent.sh")
+ENV["COMMUNITY_TEST_JULIA"] = joinpath(Sys.BINDIR, Base.julia_exename())
 
 const SHOTS = joinpath(@__DIR__, "shots")
 mkpath(SHOTS)
-const P = "2026-10-black-hole-render"
+const P = CM.project_slug("Black hole render")
 const EMPTY_PROJECT = CM.project_slug("Empty announcement")
 const VIDEO = "/home/sim/Programmieren/Science4Makie/black-hole-complete-20261025.mp4"
 
@@ -82,6 +84,25 @@ BT.atomic_write_json(joinpath(dir, "state", "apps", "community", "settings.json"
 
 shot(s, name) = (sleep(1.0); TK.screenshot(s, joinpath(SHOTS, name * ".png")))
 js(s, code) = TK.eval_js(s, code)
+function select_panel(s, name)
+    js(s, "[...document.querySelectorAll('.bt-chatpane[aria-hidden=\"false\"] .cm-dash .bw-tab')].find(n=>n.textContent === '$name').click(); true")
+end
+
+function open_community_browser(s)
+    get(ENV, "COMMUNITY_E2E_HEADLESS", "") == "1" || return TK.open_browser(s)
+    ozone = get(ENV, "COMMUNITY_E2E_OZONE", "headless")
+    ctx = withenv("ELECTRON_DISABLE_SECURITY_WARNINGS"=>"true") do
+        TK.ECT.open_window(; width=1600, height=1000, electron_args=[
+            "--ozone-platform=$ozone", "--enable-unsafe-swiftshader", "--user-data-dir=$(mktempdir())"])
+    end
+    TK.capture_console!(ctx)
+    TK.follow_pane_scope!(ctx)
+    s.browser[] = ctx
+    TK.ElectronCall.load(ctx.window, TK.ElectronCall.URI(s.h.url))
+    TK.wait_for(s, "dashboard loaded", "document.readyState === 'complete'"; timeout=30)
+    TK.install_pane_scope!(s)
+    return s
+end
 
 s = TK.dev_server(; agent, dir, apps = (BT.BUILTIN_APPS..., CommunityApp), browser_width = 1600, browser_height = 1000)
 try
@@ -108,7 +129,7 @@ try
                      "Makie v0.25.0", "## Highlights\n- A new layout engine\n- Faster text rendering",
                      "https://github.com/MakieOrg/Makie.jl/releases/tag/v0.25.0", now(UTC) - Hour(8), "new", "", "v0.25.0", "", "", "")]), app)
 
-    TK.open_browser(s)
+    open_community_browser(s)
     TK.open_chat(s, overview.id)
     TK.wait_for(s, "the overview", "!!document.querySelector('.cm-grid .cm-project')"; timeout = 30)
     shot(s, "1-overview-new")
@@ -205,11 +226,13 @@ try
     shot(s, "2-overview-drafted")
 
     # the accounts panel
+    select_panel(s, "Inbox")
     @test occursin("Colorbar ticks", js(s, "document.querySelector('.cm-replies').innerText"))
     # a release starts a blog post project
     js(s, "document.querySelector('[data-act=inbox_project]').click(); true")
     TK.wait_for(s, "the release's project", "[...document.querySelectorAll('.cm-project-title')].some(t => t.textContent === 'Makie v0.25.0 release')"; timeout = 10)
     shot(s, "2b-release-project")
+    select_panel(s, "Projects")
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
     shot(s, "3-accounts")
     js(s, "document.querySelector('.cm-platform-grid').scrollIntoView(); true")
@@ -226,6 +249,25 @@ try
     @test js(s, "document.querySelectorAll('.cm-link-chip').length") >= 3
     js(s, "document.querySelector('.cm-drafts').scrollIntoView(); true")
     shot(s, "5-drafts")
+    # On mobile the same mounted panels become a single full-width tab group.
+    js(s, "document.querySelector('[data-save=brief]').dataset.preserve='brief'; document.querySelector('.cm-player video').dataset.preserve='video'; true")
+    desktop_layout = js(s, "localStorage.getItem('community-project-layout-v1')")
+    TK.ECT.set_window_size(s.browser[], 390, 844)
+    @info "mobile viewport" metrics=js(s, "({width:innerWidth, mobile:matchMedia('(max-width: 700px)').matches, groups:document.querySelectorAll('.bt-chatpane[aria-hidden=\"false\"] .cm-dash .bw-ws-group').length})")
+    shot(s, "5-mobile-layout")
+    @test TK.wait_for(s, "mobile single tab group", "document.querySelectorAll('.bt-chatpane[aria-hidden=\"false\"] .cm-dash .bw-ws-group').length === 1"; timeout=10)
+    select_panel(s, "Brief")
+    @test js(s, "document.querySelector('[data-save=brief]').dataset.preserve === 'brief'")
+    @test js(s, "document.documentElement.scrollWidth <= window.innerWidth")
+    shot(s, "5a-mobile-brief")
+    select_panel(s, "Chat")
+    @test js(s, "document.querySelector('.bt-chatpane[aria-hidden=\"false\"] .cm-chat').getBoundingClientRect().width <= window.innerWidth")
+    shot(s, "5b-mobile-chat")
+    @test js(s, "localStorage.getItem('community-project-layout-v1')") == desktop_layout
+    TK.ECT.set_window_size(s.browser[], 1600, 1000)
+    @test TK.wait_for(s, "desktop split restored", "document.querySelectorAll('.bt-chatpane[aria-hidden=\"false\"] .cm-dash .bw-ws-group').length === 2"; timeout=10)
+    select_panel(s, "Drafts")
+    @test js(s, "document.querySelector('.cm-player video').dataset.preserve === 'video'")
     # Stable item/region identities: reviewing one card must preserve the
     # material player and another card, including unsaved browser input.
     js(s, "document.querySelector('.cm-player video').dataset.preserve = 'player'; document.querySelectorAll('.cm-drafts .cm-draft')[2].dataset.preserve = 'card'; true")
@@ -265,8 +307,10 @@ try
         "astro@mastodon.social", "Astro Fan", "This is gorgeous! How long did a frame take to render?",
         "https://mastodon.social/@astro/9", now(UTC) - Minute(12), "new", "")]), app)
     TK.wait_for(s, "the reply", "!!document.querySelector('.cm-reply')"; timeout = 10)
+    select_panel(s, "Replies")
     js(s, "document.querySelector('.cm-replies').scrollIntoView(); true")
     shot(s, "7-replies")
+    select_panel(s, "Drafts")
     @test occursin("48 likes", js(s, "document.querySelector('[data-draft=\"$(md.id)\"]').innerText"))
     # Also cover the original release failure: a new project with NO files.
     TK.open_chat(s, overview.id)

@@ -24,6 +24,7 @@ using BonitoAgents: AgentApp, AppContext, AppTool, Param, ToolScope, AppChat, Ap
     caller_user, app_chat, chat_title, chat_key, chat_file_url, find_worker, start_chat!, show_chat!,
     send_message!, atomic_write_json, load_json_tolerant, relative_time_label
 using Bonito
+import BonitoWidgets
 using Dates
 using Base64: base64encode, base64decode
 import HTTP, JSON, SHA, Sockets, libsodium_jll

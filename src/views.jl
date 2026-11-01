@@ -205,8 +205,9 @@ function message_card(x; inbox = false)
 end
 
 function project_top(d, p)
-    box("cm-section", box("cm-top", button("← Overview", "overview"; kind = "ghost"), spacer(), dropdown("state", d["states"]; selected = p["state"], dataId = p["id"])),
-        box("cm-top", node("h1", "cm-h1", p["title"]; dataEditTitle = p["id"]), brand_pill.(p["brands"])...), stepper(d["states"], p["state"]))
+    projects = node("select", "cm-select", [node("option", "", x["title"]; value=x["chat"], selected=x["chat"] == p["chat"]) for x in d["project_navigation"]]...; name="project_chat", ariaLabel="Community project")
+    box("cm-section", box("cm-top", button("← Community", "overview"; kind = "ghost"), projects, spacer(), button("Reset layout", "reset-layout"; kind="ghost"), dropdown("state", d["states"]; selected = p["state"], dataId = p["id"])),
+        box("cm-top cm-project-heading", node("h1", "cm-h1", p["title"]; dataEditTitle = p["id"]), brand_pill.(p["brands"])...), stepper(d["states"], p["state"]))
 end
 function material_view(d, p)
     media = findfirst(f -> f["video"] || f["image"], p["files"])
@@ -294,7 +295,8 @@ function dashboard_dom(session, d)
     # Construct collection containers once. Their KeyedLists keep surviving
     # widget instances and only insert/remove/move changed identities.
     data = dashboard_data(d, d.app.state[], d.app.notice[])
-    keys = data["mode"] == "overview" ? ("top", "notice", "new", "accounts", "brands", "inbox", "grid") : ("top", "notice", "hero", "drafts", "replies")
+    overview = data["mode"] == "overview"
+    keys = overview ? ("top", "notice", "new", "accounts", "brands", "inbox", "grid") : ("top", "notice", "material", "brief", "drafts", "replies")
     regions = [r(k, nothing, () -> DOM.div(; hidden = true)) for k in keys]
     function update()
         data = dashboard_data(d, d.app.state[], d.app.notice[]); ui = d.ui[]
@@ -312,10 +314,9 @@ function dashboard_dom(session, d)
             r("grid", "constant", () -> box("cm-section", label("Projects"), box("cm-grid", projects_list, button("+ New project", "toggle-new"))))
         else
             p = data["project"]
-            r("top", [p["title"], p["state"], p["brands"]], () -> project_top(data, p))
+            r("top", [p["title"], p["state"], p["brands"], data["project_navigation"]], () -> project_top(data, p))
             media = r("material", p["files"], () -> material_view(data, p))
             brief = r("brief", [p["brief"], p["links"]], () -> brief_view(p))
-            r("hero", "constant", () -> box("cm-hero", media, brief))
             drafts = filter(x -> in_filter(ui["filter"], x), p["drafts"])
             # Each card includes only its own expanded form state.
             cards = [merge(x, Dict("marking" => ui["marking"] == x["id"], "changing" => ui["changing"] == x["id"])) for x in drafts]
@@ -332,6 +333,20 @@ function dashboard_dom(session, d)
     on(session.on_close) do _
         foreach(close, values(cache))
     end
-    # Root identity and the browser controller survive every region update.
-    box("cm-dash", box("cm-toast", ""; hidden = true, role = "alert"), regions...)
+    # Workspace moves stable panels without reconstructing forms, media or chat.
+    panel(id, title, content...) = BonitoWidgets.Panel(id, box("cm-workspace-scroll", content...); label=title)
+    panels = overview ? [
+        panel("projects", "Projects", cache["new"], cache["accounts"], cache["brands"], cache["grid"]),
+        panel("inbox", "Inbox", cache["inbox"])] : [
+        panel("drafts", "Drafts", cache["drafts"]), panel("brief", "Brief", cache["brief"]),
+        panel("material", "Material", cache["material"]), panel("replies", "Replies", cache["replies"])]
+    push!(panels, BonitoWidgets.Panel("chat",
+        box("cm-chat", ChatNotice(d.view), ChatTranscript(d.view), ChatComposer(d.view), ChatToolbar()); label="Chat"))
+    workspace = BonitoWidgets.Workspace(panels; layout=d.layout)
+    if overview
+        on(session, d.ui) do ui
+            any(ui[k] for k in ("showNew", "showAccounts", "showBrands")) && BonitoWidgets.activate_panel!(workspace, "projects")
+        end
+    end
+    box("cm-dash", box("cm-toast", ""; hidden = true, role = "alert"), cache["top"], cache["notice"], workspace)
 end

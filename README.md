@@ -10,9 +10,14 @@ A BonitoAgents app for the community work around Makie, Bonito and Makie4Science
 - **Drafting.** "Start drafting" asks the overview's agent to start the project's own
   chat, in its folder. That agent writes one draft per brand and platform with its
   `project_*` tools (and may cut Shorts, thumbnails, transcripts into the folder).
-- **Review.** The project's chat shows the project beside the conversation: material,
-  brief, links, draft cards per platform. Approve, edit (double-click), or send back
-  with a note, which goes to the project's agent.
+- **Review.** Each project has Workspace panels for Drafts, Brief (including links),
+  Material, Replies and Chat. Drag tabs to arrange or split panels on desktop;
+  below 700 px they appear as one full-width tab group. Panels stay mounted when
+  switching, preserving edits and media. Desktop/mobile arrangements are saved
+  separately in the browser; Reset layout restores the default. Use the project
+  switcher or the Community breadcrumb to navigate while keeping each project's
+  independent conversation. Approve, edit (double-click), or request changes with
+  a note, which goes to the project's agent.
 - **Publishing**, with a click, never by an agent:
   - YouTube: resumable upload of the video or Short; its link fills `{youtube_url}`.
   - Bluesky, Mastodon: link posts with link cards; the other accounts repost.
