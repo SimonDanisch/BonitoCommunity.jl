@@ -262,7 +262,7 @@ function draft_card(x, ui)
         box("cm-section", reshare, box("cm-row", button("Approve", "approve"; num = id, kind = "primary"), button("Request changes", "changes-open"; id), button("Edit", "edit"; id, kind = "ghost"), spacer(), button("Remove", "remove"; num = id, kind = "ghost")))
     elseif state == "approved"
         automatic = if x["publishes"]
-            why = !isempty(x["needs_links"]) ? "Set the project's $(join(x["needs_links"], " and ")) link first" : !x["has_account"] ? "Add a $(x["platform"]) account for $(x["brand"]) in the overview" : ""
+            why = !isempty(x["needs_links"]) ? "Set the project's $(join(x["needs_links"], " and ")) link first" : !x["has_account"] ? (x["brand"] == "personal" ? "Add its personal $(x["platform"]) account again in the overview" : "Add a $(x["platform"]) account for $(x["brand"]) in the overview") : ""
             box("cm-row", button("Publish", "publish"; num = id, kind = "primary", disabled = !isempty(why)), hint(why))
         else
             parts = split(x["final_text"], "\n---\n"; limit = 2)

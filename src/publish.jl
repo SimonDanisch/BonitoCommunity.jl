@@ -15,7 +15,7 @@ function publish_draft!(app::CommunityApp, id::Int)
     pl = find_platform(d.platform)
     publishes(pl) || throw(AppError("$(platform_name(pl)) is posted by hand: post it there, then paste the link"))
     p = find_project(app, d.project)
-    origin = posting_account(app, d.brand, d.platform)
+    origin = posting_account(app, d)
     original = if d.reshare_from == 0
         text = fill_links(d.text, p)
         publish(pl, app, origin, d, text)
@@ -127,7 +127,7 @@ function publishable_drafts(app::CommunityApp, project_id::AbstractString)
         missing = d.reshare_from == 0 ? missing_links(d.text, p) : String[]
         filter!(x -> !(x == "youtube" && has_youtube), missing)
         isempty(missing) || throw(AppError("draft #$(d.id) needs the project's $(join(missing, " and ")) link before this release can be sent"))
-        posting_account(app, d.brand, d.platform)
+        posting_account(app, d)
         if d.reshare_from != 0
             source = find_draft(app, d.reshare_from)
             source.project == d.project && source.platform == d.platform && source.reshare_from == 0 ||

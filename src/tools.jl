@@ -49,13 +49,17 @@ BonitoAgents.app_tools(::CommunityApp) = [
         (;); scope = ProjectChats),
     AppTool(:project_draft,
         "Write a draft for this chat's project, or replace one (`draft_id`). A replaced draft goes back to the " *
-        "user for approval. Link to the project's YouTube video with $YOUTUBE_LINK.",
-        (brand = Param(String, "The brand whose account posts it."),
+        "user for approval. Who posts it: a `brand` (its account) or a personal `account`, as `project_info` " *
+        "lists them. A reshare (`reshare`) reposts another original draft of this project on the same " *
+        "platform, e.g. a brand reposting a personal post. Link to the project's YouTube video with $YOUTUBE_LINK.",
+        (brand = Param(String, "The brand whose account posts it; empty for a personal account's post.", ""),
+         account = Param(String, "A personal account that posts it, by its id from `project_info` (\"bluesky:handle\"); empty for a brand's post.", ""),
          platform = Param(String, "youtube, tiktok, instagram, facebook, bluesky, mastodon or linkedin."),
-         kind = Param(String, "What it is: video, short, reel, post, ..."),
-         text = Param(String, "The post text (for YouTube: the description)."),
+         kind = Param(String, "What it is: video, short, reel, post, repost, ..."),
+         text = Param(String, "The post text (for YouTube: the description); empty for a reshare."),
          title = Param(String, "YouTube only: the title.", ""),
          media = Param(String, "Files from the project folder it uses, comma-separated.", ""),
+         reshare = Param(Int, "The original draft this one reposts (same platform); 0 for a post of its own.", 0),
          draft_id = Param(Int, "The draft to replace; 0 for a new one.", 0));
         scope = ProjectChats),
     AppTool(:project_submit,
@@ -134,8 +138,10 @@ function BonitoAgents.app_briefing(app::CommunityApp, key::AbstractString)
 
     - `project_info`: the brief, the brands and their platforms, what each
       platform gets and its limits, the drafts so far and the user's notes.
-    - `project_draft`: one draft per brand and platform; `draft_id` replaces
-      one (it goes back to review). Bluesky and Mastodon can carry up to four
+    - `project_draft`: one draft per poster and platform: a brand (its
+      account posts it) or a personal `account`; `draft_id` replaces one (it
+      goes back to review). A `reshare` reposts another draft, e.g. a brand
+      reposting a personal post. Bluesky and Mastodon can carry up to four
       native images and link to the YouTube video with $YOUTUBE_LINK.
     - `project_submit`: when the drafts are ready for review.
     - `project_replies` and `project_answer`: answers to the replies, once the
@@ -229,8 +235,10 @@ end
 
 # ── the project chats' tools ────────────────────────────────────────────────
 
+poster(d::Draft) = isempty(d.account) ? d.brand : "$(d.account) (personal)"
+
 function draft_line(d::Draft)
-    head = "#$(d.id) [$(d.status)] $(d.brand) · $(d.platform) · $(d.kind)"
+    head = "#$(d.id) [$(d.status)] $(poster(d)) · $(d.platform) · $(d.kind)"
     body = isempty(d.title) ? d.text : "title: $(d.title)\n$(d.text)"
     lines = [head, body]
     isempty(d.media) || push!(lines, "media: " * join(d.media, ", "))
@@ -245,10 +253,15 @@ function BonitoAgents.call_tool(app::CommunityApp, ::Val{:project_info}, call::A
     s = app.state[]
     brands = map(p.brands) do name
         b = find_brand(app, name)
-        plats = join(("  - $(platform_name(pl)) (≤ $(max_text(pl)) chars$(max_title(pl) > 0 ? ", title ≤ $(max_title(pl))" : "")): $(role(pl))"
+        plats = join(("  - $(platform_name(pl)) (≤ $(max_text(pl)) chars$(max_title(pl) > 0 ? ", title ≤ $(max_title(pl))" : "")): " *
+                      "$(role(pl)) · $(posted_as(app, b.name, pl))"
                       for pl in PLATFORMS if platform_id(pl) in b.platforms), "\n")
         "## $(b.name)\n$(b.notes)\n$plats"
     end
+    personal = [a for a in s.accounts if isempty(a.brand)]
+    personal_lines = isempty(personal) ? "none" : join(("- `$(a.id)` on $(platform_name(find_platform(a.platform))): posts " *
+        "the drafts that name it as `account`, and by itself reposts every original published on " *
+        "$(platform_name(find_platform(a.platform)))" for a in personal), "\n")
     files = material(projects_dir(app), p)
     drafts = project_drafts(s, p.id)
     links = isempty(p.links) ? "none yet" : join(("$k: $v" for (k, v) in p.links), ", ")
@@ -261,18 +274,37 @@ function BonitoAgents.call_tool(app::CommunityApp, ::Val{:project_info}, call::A
 
     $(join(brands, "\n\n"))
 
+    # Personal accounts
+    $personal_lines
+
+    A reshare (`reshare` = the id of an original draft on the same platform, no
+    text) has its account repost that draft once it is out: a brand reposting a
+    personal post or another brand's. Never write a repost as a text post.
+
     # Drafts
     $(isempty(drafts) ? "none yet" : join(draft_line.(drafts), "\n\n"))"""
+end
+
+# How a brand's drafts on `pl` go out, for the agent.
+function posted_as(app::CommunityApp, brand::AbstractString, pl::Platform)
+    publishes(pl) || return "posted by hand"
+    i = findfirst(a -> a.role == "post" && a.brand == brand && a.platform == platform_id(pl), app.state[].accounts)
+    i === nothing && return "NO ACCOUNT yet: its drafts here can't be published until one is added under Accounts"
+    return "posts as @" * app.state[].accounts[i].handle
 end
 
 split_list(s::AbstractString) = String[strip(x) for x in split(s, ',') if !isempty(strip(x))]
 
 function BonitoAgents.call_tool(app::CommunityApp, ::Val{:project_draft}, call::AppCall)
     p = caller_project(app, call)
-    (; brand, platform, kind, text, title, media, draft_id) = call.args
+    (; brand, account, platform, kind, text, title, media, reshare, draft_id) = call.args
     isempty(strip(media)) || collect_project_files!(app, p, call.caller)
-    d = save_draft!(app, p.id; draft_id, brand, platform, kind, title, text, media = split_list(media))
-    return "Saved draft #$(d.id) ($(d.brand) · $(d.platform) · $(d.kind))."
+    d = save_draft!(app, p.id; draft_id, brand, account, platform, kind, title, text, media = split_list(media), reshare)
+    pl = find_platform(d.platform)
+    unpostable = publishes(pl) && draft_account(app, d) === nothing ?
+        " No $(platform_name(pl)) account posts for $(d.brand) yet: it can't be published until one is added under Accounts." : ""
+    return "Saved draft #$(d.id) ($(poster(d)) · $(d.platform) · $(d.kind)" *
+           (d.reshare_from == 0 ? ")." : ", reshares #$(d.reshare_from)).") * unpostable
 end
 
 function BonitoAgents.call_tool(app::CommunityApp, ::Val{:project_submit}, call::AppCall)

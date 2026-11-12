@@ -534,6 +534,56 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test uploads[2][1] == "/api/v2/media" && occursin("multipart/form-data", uploads[2][2]) && occursin("announcement.png", String(uploads[2][3]))
     end
 
+    # A personal account posts a draft of its own and a brand reposts it with a
+    # reshare draft. On 2026-11-12 an agent could do neither: it wrote "Repost
+    # the announcement from your personal account" as a Makie text post, and
+    # drafted for a brand with no account on the platform without knowing.
+    @testset "a personal account posts, a brand reshares it" begin
+        srv, app2, projects2 = test_server()
+        app2.poller === nothing || close(app2.poller)
+        CM.add_account_with_pin!(app2, "mastodon", "Makie", "makie@fosstodon.org", "", "post", "good", PIN)
+        CM.add_account_with_pin!(app2, "mastodon", "", "sim@julialang.social", "", "amplify", "good", PIN)
+        q = CM.new_project!(app2, "Release", ["Makie"], "")
+        pc = BT.add_project!(srv, BT.ProjectInfo("pc", q.title, "w", mktempdir(), joinpath(projects2, q.id), now(UTC)))
+        pc.app = "community"; pc.app_key = CM.project_key(q)
+        saved(r) = parse(Int, match(r"Saved draft #(\d+)", r)[1])
+        draft(; args...) = call(srv, pc, "project_draft"; platform = "mastodon", kind = "post", args...)
+
+        info = call(srv, pc, "project_info")
+        @test occursin("`mastodon:sim@julialang.social` on Mastodon: posts the drafts that name it", info)
+        @test occursin("posts as @makie@fosstodon.org", info)
+        @test occursin("NO ACCOUNT yet", info)                          # Makie on Bluesky
+
+        r = draft(; account = "mastodon:sim@julialang.social", text = "I made a black hole")
+        own = saved(r)
+        @test occursin("(personal)", r)
+        @test occursin("pass that draft's id as `reshare`", draft(; brand = "Makie", kind = "repost", text = "Repost Simon's post"))
+        @test occursin("leave `text`", draft(; brand = "Makie", kind = "repost", text = "x", reshare = own))
+        @test occursin("not both", draft(; brand = "Makie", account = "mastodon:sim@julialang.social", text = "x"))
+        @test occursin("is Makie's account", draft(; account = "mastodon:makie@fosstodon.org", text = "x"))
+        @test occursin("say who posts it", draft(; text = "x"))
+        @test occursin("can't be published", draft(; brand = "Makie", platform = "bluesky", text = "x"))
+        r = draft(; brand = "Makie", kind = "repost", text = "", reshare = own)
+        boost = saved(r)
+        @test occursin("reshares #$own", r)
+        @test occursin("#$own [draft] mastodon:sim@julialang.social (personal) · mastodon · post", call(srv, pc, "project_info"))
+
+        dash = CM.Dashboard(app2, nothing, "")
+        x = CM.draft_data(dash, CM.find_draft(app2, own), q)
+        @test x["brand"] == "personal" && x["has_account"] && x["account_label"] == "@sim@julialang.social"
+        @test Dict("id" => own, "label" => "#$own · @sim@julialang.social") in
+              CM.draft_data(dash, CM.find_draft(app2, boost), q)["reshare_options"]
+        close(dash)
+
+        CM.review_draft!(app2, own, "approved"); CM.review_draft!(app2, boost, "approved")
+        CM.publish_with_pin!(app2, own, PIN)
+        @test last(NET.posted) == ("mastodon:sim@julialang.social", "I made a black hole")
+        @test [p.account for p in CM.find_draft(app2, own).posts] == ["mastodon:sim@julialang.social"]   # no repost of itself
+        CM.publish_with_pin!(app2, boost, PIN)
+        @test last(NET.reposted) == ("mastodon:makie@fosstodon.org", "101")
+        @test only(CM.find_draft(app2, boost).posts).kind == "repost"
+    end
+
     @testset "state survives a restart" begin
         @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "Renamed", ["youtube"], "")
         @test_throws BT.AppError CM.save_brand!(app, "Makie4Science", "", String[], ""; remove=true)

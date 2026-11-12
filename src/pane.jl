@@ -95,18 +95,18 @@ end
 function draft_data(dashboard::Dashboard, d::Draft, p::Project)
     app = dashboard.app
     pl = find_platform(d.platform)
-    account = findfirst(a -> a.role == "post" && a.brand == d.brand && a.platform == d.platform, app.state[].accounts)
+    account = draft_account(app, d)
     Dict{String,Any}(
-        "id" => d.id, "brand" => d.brand, "platform" => platform_id(pl), "kind" => d.kind,
+        "id" => d.id, "brand" => isempty(d.brand) ? "personal" : d.brand, "platform" => platform_id(pl), "kind" => d.kind,
         "title" => d.title, "text" => d.text, "final_text" => shown_text(d, p), "media" => d.media,
         "media_files" => [file_data(dashboard, p, f) for f in d.media],
         "status" => d.status, "note" => d.note, "chars" => text_length(pl, d.text), "max" => max_text(pl),
         "publishes" => publishes(pl), "has_account" => account !== nothing,
-        "account_label" => account === nothing ? "" : account_label(app, app.state[].accounts[account].id),
+        "account_label" => account === nothing ? "" : account_label(app, account.id),
         "reshare_from" => d.reshare_from,
-        "reshare_options" => [Dict("id" => x.id, "label" => "#$(x.id) · $(x.brand) · $(account_label(app, posting_account(app, x.brand, x.platform).id))")
-                              for x in project_drafts(app.state[], d.project) if x.id != d.id && x.platform == d.platform && x.reshare_from == 0 &&
-                                  findfirst(a -> a.role == "post" && a.brand == x.brand && a.platform == x.platform, app.state[].accounts) !== nothing],
+        "reshare_options" => [Dict("id" => x.id, "label" => "#$(x.id) · $(account_label(app, a.id))")
+                              for x in project_drafts(app.state[], d.project) if x.id != d.id && x.platform == d.platform && x.reshare_from == 0
+                              for a in (draft_account(app, x),) if a !== nothing],
         "needs_links" => d.reshare_from == 0 ? missing_links(d.text, p) : String[],
         "posts" => [Dict("url" => x.url, "kind" => x.kind, "account" => x.account, "account_label" => account_label(app, x.account)) for x in d.posts],
         "stats" => isempty(d.posts) ? Dict{String,Int}() : d.posts[1].stats,

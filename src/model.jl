@@ -67,7 +67,7 @@ const DRAFT_STATES = ("draft", "approved", "changes", "publishing", "published",
 JSON.@defaults struct Draft
     id::Int
     project::String
-    brand::String
+    brand::String                 # whose account posts it; "" for a personal account's draft (`account`)
     platform::String              # platform id
     kind::String                  # "video", "short", "reel", "post", ...
     title::String
@@ -78,6 +78,7 @@ JSON.@defaults struct Draft
     posts::Vector{Post} = Post[]  # once published: the original first, then reposts
     reshare_from::Int = 0          # another draft in this project; 0 means publish this as an original
     updated::DateTime = now(UTC)
+    account::String = ""          # the personal account that posts it; "" for the brand's account
 end
 
 const REPLY_STATES = ("new", "drafted", "answered", "ignored")

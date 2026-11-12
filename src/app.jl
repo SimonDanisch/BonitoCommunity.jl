@@ -224,33 +224,43 @@ function scan_projects!(app::CommunityApp)
 end
 
 """
-    save_draft!(app, project_id; draft_id = 0, brand, platform, kind, title, text, media) -> Draft
+    save_draft!(app, project_id; draft_id = 0, brand = "", account = "", platform, kind, title, text, media, reshare = 0) -> Draft
 
 Create a draft (`draft_id == 0`) or replace one. Either way it goes back to
 `draft`: whatever was approved before is not what it says now. A published
 draft stays as it was published.
+
+Who posts it: one of the project's `brand`s, through its account on the
+platform, or a personal `account` itself. With `reshare`, the id of an original
+draft on the same platform, it posts nothing of its own: it reposts that one.
 """
-function save_draft!(app::CommunityApp, project_id::AbstractString; draft_id::Int = 0, brand::AbstractString,
-                     platform::AbstractString, kind::AbstractString, title::AbstractString = "",
-                     text::AbstractString, media::Vector{String} = String[])
+function save_draft!(app::CommunityApp, project_id::AbstractString; draft_id::Int = 0, brand::AbstractString = "",
+                     account::AbstractString = "", platform::AbstractString, kind::AbstractString,
+                     title::AbstractString = "", text::AbstractString, media::Vector{String} = String[],
+                     reshare::Int = 0)
     p = find_project(app, project_id)
-    b = find_brand(app, brand)
-    b.name in p.brands || throw(AppError("project '$(p.id)' is not for $(b.name) (its brands: $(join(p.brands, ", ")))"))
     pl = find_platform(platform)
-    platform_id(pl) in b.platforms ||
-        throw(AppError("$(b.name) does not post on $(platform_name(pl)) (it does on $(join(b.platforms, ", ")))"))
-    check_draft_text(pl, title, text)
-    check_draft_media(pl, media)
-    files = material(projects_dir(app), p)
-    missing_ = filter(m -> !(m in files), media)
-    isempty(missing_) || throw(AppError("not in the project folder: $(join(missing_, ", ")) (it has: $(join(files, ", ")))"))
+    poster_brand, poster_account = draft_poster(app, p, pl, brand, account)
+    if reshare == 0
+        lowercase(strip(kind)) in ("repost", "reshare") &&
+            throw(AppError("a $(strip(kind)) reposts another draft: pass that draft's id as `reshare`"))
+        check_draft_text(pl, title, text)
+        check_draft_media(pl, media)
+        files = material(projects_dir(app), p)
+        missing_ = filter(m -> !(m in files), media)
+        isempty(missing_) || throw(AppError("not in the project folder: $(join(missing_, ", ")) (it has: $(join(files, ", ")))"))
+    else
+        isempty(strip(text)) && isempty(strip(title)) && isempty(media) ||
+            throw(AppError("a reshare reposts draft #$reshare as it is: leave `text`, `title` and `media` empty"))
+        reshare_source(app, p.id, platform_id(pl), draft_id, reshare)
+    end
     local d
     update!(app) do s
         drafts = copy(s.drafts)
         next = s.next_draft
         if draft_id == 0
-            d = Draft(next, p.id, b.name, platform_id(pl), strip(kind), strip(title), strip(text), media,
-                      "draft", "", Post[], 0, now(UTC))
+            d = Draft(next, p.id, poster_brand, platform_id(pl), strip(kind), strip(title), strip(text), media,
+                      "draft", "", Post[], reshare, now(UTC), poster_account)
             push!(drafts, d)
             next += 1
         else
@@ -258,13 +268,44 @@ function save_draft!(app::CommunityApp, project_id::AbstractString; draft_id::In
             old = drafts[i]
             old.project == p.id || throw(AppError("draft #$draft_id belongs to project '$(old.project)'"))
             is_out(old) && throw(AppError("draft #$draft_id is $(old.status); write a new one instead"))
-            d = drafts[i] = change(old; brand = b.name, platform = platform_id(pl), kind = strip(kind),
-                                   title = strip(title), text = strip(text), media, status = "draft",
-                                   note = "", updated = now(UTC))
+            d = drafts[i] = change(old; brand = poster_brand, account = poster_account, platform = platform_id(pl),
+                                   kind = strip(kind), title = strip(title), text = strip(text), media,
+                                   reshare_from = reshare, status = "draft", note = "", updated = now(UTC))
         end
         with(s; next_draft = next, drafts)
     end
     return d
+end
+
+# Who posts a draft, as (brand, account): a brand of the project that posts on
+# the platform, or a personal account (one of no brand) on the platform.
+function draft_poster(app::CommunityApp, p::Project, pl::Platform, brand::AbstractString, account::AbstractString)
+    b, a = strip(brand), strip(account)
+    isempty(b) && isempty(a) && throw(AppError("say who posts it: one of the project's brands, or a personal `account`"))
+    !isempty(b) && !isempty(a) && throw(AppError("give the brand or the personal account that posts it, not both"))
+    if isempty(a)
+        br = find_brand(app, b)
+        br.name in p.brands || throw(AppError("project '$(p.id)' is not for $(br.name) (its brands: $(join(p.brands, ", ")))"))
+        platform_id(pl) in br.platforms ||
+            throw(AppError("$(br.name) does not post on $(platform_name(pl)) (it does on $(join(br.platforms, ", ")))"))
+        return (br.name, "")
+    end
+    acc = find_account(app, a)
+    isempty(acc.brand) || throw(AppError("$(acc.id) is $(acc.brand)'s account: draft it as `brand = \"$(acc.brand)\"`"))
+    acc.platform == platform_id(pl) || throw(AppError("$(acc.id) is a $(acc.platform) account, not $(platform_id(pl))"))
+    return ("", acc.id)
+end
+
+# The original draft `source_id` that draft `id` (0 for a new one) of project
+# `project` on `platform` may reshare.
+function reshare_source(app::CommunityApp, project::AbstractString, platform::AbstractString, id::Int, source_id::Int)
+    source_id == id && throw(AppError("a draft cannot reshare itself"))
+    pl = find_platform(platform)
+    publishes(pl) && reposts(pl) || throw(AppError("the app does not repost on $(platform_name(pl))"))
+    source = find_draft(app, source_id)
+    source.project == project && source.platform == platform && source.reshare_from == 0 ||
+        throw(AppError("draft #$source_id is not an original $platform draft of this project; only those can be reshared"))
+    return source
 end
 
 function set_draft!(app::CommunityApp, id::Int; kw...)
@@ -286,10 +327,7 @@ function set_draft_reshare!(app::CommunityApp, id::Int, source_id::Int)
     if source_id == 0
         return set_draft!(app, id; reshare_from = 0, status = "draft")
     end
-    source_id == id && throw(AppError("a draft cannot reshare itself"))
-    source = find_draft(app, source_id)
-    source.project == d.project && source.platform == d.platform && source.reshare_from == 0 ||
-        throw(AppError("choose an original draft from this project and platform"))
+    source = reshare_source(app, d.project, d.platform, id, source_id)
     return set_draft!(app, id; reshare_from = source.id, status = "draft")
 end
 
@@ -388,6 +426,21 @@ function posting_account(app::CommunityApp, brand::AbstractString, platform::Abs
     i = findfirst(a -> a.role == "post" && a.brand == brand && a.platform == platform, app.state[].accounts)
     i === nothing && throw(AppError("no $(platform_name(find_platform(platform))) account posts for $brand yet; add one under Accounts"))
     return app.state[].accounts[i]
+end
+
+"The account that publishes draft `d`: the personal account it names, else its brand's; `nothing` while there is none."
+function draft_account(app::CommunityApp, d::Draft)
+    accounts = app.state[].accounts
+    i = isempty(d.account) ? findfirst(a -> a.role == "post" && a.brand == d.brand && a.platform == d.platform, accounts) :
+                             findfirst(a -> a.id == d.account, accounts)
+    return i === nothing ? nothing : accounts[i]
+end
+
+function posting_account(app::CommunityApp, d::Draft)
+    isempty(d.account) && return posting_account(app, d.brand, d.platform)
+    a = draft_account(app, d)
+    a === nothing && throw(AppError("draft #$(d.id) posts as $(d.account), which is no longer an account; add it again under Accounts"))
+    return a
 end
 
 "Explicitly configured personal accounts that repost `origin`'s post. Brand accounts reshare only when selected on that draft."
