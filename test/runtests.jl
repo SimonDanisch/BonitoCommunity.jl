@@ -176,6 +176,37 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test occursin("Community app's overview", BT.app_prompt_appendix(server, overview))
     end
 
+    # "Continue on" makes a new chat with the same key and leaves the original on
+    # its worker, which may be gone for good (an old SSD, 2026-11-12). The
+    # project follows the newest: its link, its pictures and the start check.
+    @testset "a project chat continued on another worker takes over" begin
+        moved_server, moved_app, moved_projects = test_server()
+        moved_app.poller === nothing || close(moved_app.poller)
+        q = CM.new_project!(moved_app, "Moved", ["Makie"], "")
+        write(joinpath(moved_projects, q.id, "cover.png"), "fake image")
+        moved_server.workers[]["w2"] = BT.WorkerInfo("w2", "Bosgame", nothing, "h2", "/home/v", "julia", String[],
+                                                     "/home/v/p", :online, now())
+        t = now(UTC)
+        for (id, worker, folder, created) in (("old", "w", "/home/u/p/$(q.id)", t), ("new", "w2", "/home/v/p/$(q.id)", t + Second(1)))
+            c = BT.add_project!(moved_server, BT.ProjectInfo(id, q.title, worker, mktempdir(), folder, created))
+            c.app = "community"; c.app_key = CM.project_key(q)
+        end
+        CM.set_project!(moved_app, q.id; chat = "old")       # the chat it was started with
+        @test CM.project_chat(moved_app, q).id == "new"
+        @test BT.app_chat(moved_server, moved_app).id == "c1"
+        dashboard = CM.Dashboard(moved_app, nothing, "")
+        data = CM.dashboard_data(dashboard, moved_app.state[], "")
+        card = only(filter(c -> c["id"] == q.id, data["projects"]))
+        @test card["chat"] == "new"
+        @test startswith(card["cover"]["url"], "/worker-file/w2?path=" * HTTP.escapeuri("/home/v/p/$(q.id)/cover.png") * "&")
+        @test Dict("title" => q.title, "chat" => "new") in data["project_navigation"]
+        overview = moved_server.projects[]["c1"]
+        @test occursin("(new) · drafts", call(moved_server, overview, "cm_projects"))
+        @test occursin("has its chat already (new)",
+                       call(moved_server, overview, "cm_start_project_chat"; project = q.id, prompt = "go"))
+        close(dashboard)
+    end
+
     chat = server.projects[]["c2"]
 
     @testset "drafts" begin

@@ -7,6 +7,10 @@ const PROJECT_KEY = "project/"
 project_key(p::Project) = PROJECT_KEY * p.id
 const ProjectChats = AppKeyedChats(PROJECT_KEY)
 
+# The project's chat, by its key: the newest, so a chat continued on another
+# worker takes over from the one it left behind. `nothing` before it is started.
+project_chat(app::CommunityApp, p::Project) = app_chat(app.ctx.server, app, project_key(p))
+
 function caller_project(app::CommunityApp, call::AppCall)
     key = call.caller.app_key
     startswith(key, PROJECT_KEY) || throw(AppError("this chat is not a project's"))
@@ -164,7 +168,8 @@ function project_summary(app::CommunityApp, s::CommunityFile, p::Project)
     counts = join(("$(count(d -> d.status == st, drafts)) $st" for st in DRAFT_STATES if any(d -> d.status == st, drafts)), ", ")
     files = material(projects_dir(app), p)
     replies = count(r -> r.status == "new", project_replies(s, p.id))
-    chat = isempty(p.chat) ? "none yet" : "\"$(something(chat_title(app.ctx.server, p.chat), "closed"))\" ($(p.chat))"
+    c = project_chat(app, p)
+    chat = c === nothing ? "none yet" : "\"$(c.title[])\" ($(c.id))"
     return """
     - $(p.id): "$(p.title)" · $(p.state) · brands: $(isempty(p.brands) ? "none set" : join(p.brands, ", "))
       chat: $chat · drafts: $(isempty(counts) ? "none" : counts) · new replies: $replies
@@ -188,8 +193,8 @@ function BonitoAgents.call_tool(app::CommunityApp, ::Val{:cm_start_project_chat}
     (; project, prompt) = call.args
     p = find_project(app, project)
     isempty(p.brands) && throw(AppError("project '$(p.id)' has no brands yet; set them in the pane first"))
-    isempty(p.chat) || chat_title(call.server, p.chat) === nothing ||
-        throw(AppError("project '$(p.id)' has its chat already ($(p.chat))"))
+    started = project_chat(app, p)
+    started === nothing || throw(AppError("project '$(p.id)' has its chat already ($(started.id))"))
     owner = caller_user(call)
     worker = find_worker(call.server, owner, call.caller.worker_id)
     worker === nothing && throw(AppError("this chat's worker is gone"))

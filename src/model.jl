@@ -47,7 +47,7 @@ JSON.@defaults struct Project
     brief::String                 # what it is about and what the posts should say
     state::String                 # one of PROJECT_STATES
     created::DateTime
-    chat::String                  # the project chat's id; "" before it is started
+    chat::String                  # the id of the chat it was started with; its chat now is `project_chat`
     links::Dict{String,String} = Dict{String,String}()   # "youtube" => the video's URL, filled into {youtube_url}
 end
 

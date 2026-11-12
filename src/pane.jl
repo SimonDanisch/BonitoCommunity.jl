@@ -127,10 +127,10 @@ end
 
 # A file of the project as the page shows it: a URL the browser streams it from.
 function file_data(d::Dashboard, p::Project, f::AbstractString)
-    chat = get(d.app.ctx.server.projects[], p.chat, nothing)
-    folder = chat === nothing ? project_folder(projects_dir(d.app), p) : chat.worker_path
-    return Dict{String,Any}("name" => f, "video" => is_video(f), "image" => is_image(f),
-                          "url" => chat_file_url(d.view, joinpath(folder, f)))
+    chat = project_chat(d.app, p)
+    url = chat === nothing ? chat_file_url(d.view, joinpath(project_folder(projects_dir(d.app), p), f)) :
+                             chat_file_url(d.app.ctx.server, chat, joinpath(chat.worker_path, f))
+    return Dict{String,Any}("name" => f, "video" => is_video(f), "image" => is_image(f), "url" => url)
 end
 
 function counts(drafts::Vector{Draft})
@@ -143,9 +143,10 @@ end
 function project_card(d::Dashboard, s::CommunityFile, p::Project)
     files = material(projects_dir(d.app), p)
     cover = findfirst(f -> is_video(f) || is_image(f), files)
+    chat = project_chat(d.app, p)
     Dict{String,Any}(
         "id" => p.id, "title" => p.title, "state" => p.state, "brands" => p.brands, "brief" => p.brief,
-        "chat" => isempty(p.chat) || chat_title(d.app.ctx.server, p.chat) === nothing ? nothing : p.chat,
+        "chat" => chat === nothing ? nothing : chat.id,
         "cover" => cover === nothing ? nothing : file_data(d, p, files[cover]),
         "nfiles" => length(files), "counts" => counts(project_drafts(s, p.id)),
         "new_replies" => count(r -> r.status == "new", project_replies(s, p.id)),
@@ -158,7 +159,8 @@ function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
     app = d.app
     platforms = [platform_data(pl) for pl in PLATFORMS]
     base = Dict{String,Any}(
-        "project_navigation" => [Dict("title"=>p.title, "chat"=>p.chat) for p in s.projects if !isempty(p.chat)],
+        "project_navigation" => [Dict("title"=>p.title, "chat"=>c.id) for p in s.projects
+                                 for c in (project_chat(app, p),) if c !== nothing],
         "brands" => brand_names(app), "states" => collect(PROJECT_STATES), "notice" => notice,
         "brand_details" => [Dict("name"=>b.name, "platforms"=>b.platforms, "notes"=>b.notes, "in_use"=>brand_in_use(app,b.name)) for b in app.settings.brands],
         "platforms" => platforms, "folder" => projects_dir(app),
