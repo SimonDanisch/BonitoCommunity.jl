@@ -164,7 +164,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         chat.app = "community"; chat.app_key = CM.project_key(p)
         CM.set_project!(app, p.id; chat = "c2", state = "drafting")
         @test Set(tools(server, chat)) ==
-              Set(["project_info", "project_draft", "project_submit", "project_replies", "project_answer"])
+              Set(["project_info", "project_draft", "project_remove_draft", "project_submit", "project_replies", "project_answer"])
         @test BT.app_chat(server, app).id == "c1"           # the project chat is not the app's chat
         @test occursin("Bluesky (≤ 300 chars)", call(server, chat, "project_info"))
         @test occursin("community project `$(p.id)`", BT.app_prompt_appendix(server, chat))
@@ -550,27 +550,55 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         draft(; args...) = call(srv, pc, "project_draft"; platform = "mastodon", kind = "post", args...)
 
         info = call(srv, pc, "project_info")
-        @test occursin("`mastodon:sim@julialang.social` on Mastodon: posts the drafts that name it", info)
+        @test occursin("`mastodon:sim@julialang.social` on Mastodon: posts the user's own drafts there", info)
         @test occursin("posts as @makie@fosstodon.org", info)
         @test occursin("NO ACCOUNT yet", info)                          # Makie on Bluesky
+        @test occursin("posted by hand (TikTok, LinkedIn, Discourse)", info)
 
-        r = draft(; account = "mastodon:sim@julialang.social", text = "I made a black hole")
+        # The user's own posts: through their one Mastodon account, and by hand on
+        # LinkedIn and Discourse, where nobody has an account (2026-11-12, the
+        # agent could not draft those as personal posts).
+        r = draft(; personal = true, text = "I made a black hole")
         own = saved(r)
-        @test occursin("(personal)", r)
+        @test occursin("you (personal) · mastodon", r) && !occursin("can't be published", r)
+        r = draft(; personal = true, platform = "linkedin", text = "We released BonitoAgents")
+        @test occursin("you (personal) · linkedin", r) && !occursin("can't be published", r)
+        @test occursin("you (personal) · discourse",
+                       draft(; personal = true, platform = "discourse", title = "BonitoAgents 0.2", text = "It is out."))
+        @test occursin("can't be published until the user's personal Bluesky account is added",
+                       draft(; personal = true, platform = "bluesky", text = "x"))
+        @test occursin("mastodon:sim@julialang.social (personal)", draft(; account = "mastodon:sim@julialang.social", text = "named"))
+
         @test occursin("pass that draft's id as `reshare`", draft(; brand = "Makie", kind = "repost", text = "Repost Simon's post"))
         @test occursin("leave `text`", draft(; brand = "Makie", kind = "repost", text = "x", reshare = own))
-        @test occursin("not both", draft(; brand = "Makie", account = "mastodon:sim@julialang.social", text = "x"))
+        @test occursin("not both", draft(; brand = "Makie", personal = true, text = "x"))
         @test occursin("is Makie's account", draft(; account = "mastodon:makie@fosstodon.org", text = "x"))
         @test occursin("say who posts it", draft(; text = "x"))
-        @test occursin("can't be published", draft(; brand = "Makie", platform = "bluesky", text = "x"))
+        @test occursin("until a Bluesky account for Makie is added", draft(; brand = "Makie", platform = "bluesky", text = "x"))
         r = draft(; brand = "Makie", kind = "repost", text = "", reshare = own)
         boost = saved(r)
         @test occursin("reshares #$own", r)
-        @test occursin("#$own [draft] mastodon:sim@julialang.social (personal) · mastodon · post", call(srv, pc, "project_info"))
+        @test occursin("#$own [draft] you (personal) · mastodon · post", call(srv, pc, "project_info"))
+
+        # Duplicates go. A draft another reshares stays, and so does another project's.
+        dup = saved(draft(; personal = true, platform = "linkedin", text = "We released BonitoAgents"))
+        @test occursin("Removed draft #$dup", call(srv, pc, "project_remove_draft"; draft_id = dup))
+        @test !any(d -> d.id == dup, app2.state[].drafts)
+        @test occursin("reshares draft #$own", call(srv, pc, "project_remove_draft"; draft_id = own))
+        elsewhere = CM.save_draft!(app2, CM.new_project!(app2, "Other", ["Makie"], "").id;
+                                   brand = "Makie", platform = "mastodon", kind = "post", text = "x")
+        @test occursin("belongs to project", call(srv, pc, "project_remove_draft"; draft_id = elsewhere.id))
+
+        # With two personal accounts on a platform, a personal draft names one.
+        CM.add_account_with_pin!(app2, "mastodon", "", "simon@mastodon.social", "", "amplify", "good", PIN)
+        @test occursin("name the one that posts it as `account`", draft(; personal = true, text = "x"))
+        CM.remove_account_with_pin!(app2, "mastodon:simon@mastodon.social", PIN)
 
         dash = CM.Dashboard(app2, nothing, "")
         x = CM.draft_data(dash, CM.find_draft(app2, own), q)
         @test x["brand"] == "personal" && x["has_account"] && x["account_label"] == "@sim@julialang.social"
+        hand = CM.draft_data(dash, only(d for d in app2.state[].drafts if d.platform == "linkedin"), q)
+        @test hand["brand"] == "personal" && !hand["publishes"] && hand["account_label"] == ""
         @test Dict("id" => own, "label" => "#$own · @sim@julialang.social") in
               CM.draft_data(dash, CM.find_draft(app2, boost), q)["reshare_options"]
         close(dash)
@@ -582,6 +610,46 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         CM.publish_with_pin!(app2, boost, PIN)
         @test last(NET.reposted) == ("mastodon:makie@fosstodon.org", "101")
         @test only(CM.find_draft(app2, boost).posts).kind == "repost"
+    end
+
+    # The BonitoAgents release as it stood on 2026-11-12, every step a person
+    # takes: the agent turns its brand LinkedIn draft into the user's own post and
+    # removes a duplicate; the user's posts go out on Mastodon automatically and by
+    # hand on LinkedIn and Discourse; Makie boosts the user's post.
+    @testset "a release of personal posts goes all the way out" begin
+        srv, app3, projects3 = test_server()
+        app3.poller === nothing || close(app3.poller)
+        CM.add_account_with_pin!(app3, "mastodon", "Makie", "makie@fosstodon.org", "", "post", "good", PIN)
+        CM.add_account_with_pin!(app3, "mastodon", "", "sim@julialang.social", "", "amplify", "good", PIN)
+        q = CM.new_project!(app3, "BonitoAgents release", ["Makie", "Bonito"], "Announcing BonitoAgents")
+        pc = BT.add_project!(srv, BT.ProjectInfo("rel", q.title, "w", mktempdir(), joinpath(projects3, q.id), now(UTC)))
+        pc.app = "community"; pc.app_key = CM.project_key(q)
+        tool(name; args...) = call(srv, pc, name; args...)
+        draft(; args...) = parse(Int, match(r"Saved draft #(\d+)", tool("project_draft"; kind = "post", args...))[1])
+
+        linkedin = draft(; brand = "Bonito", platform = "linkedin", text = "BonitoAgents is out")
+        dup = draft(; brand = "Bonito", platform = "linkedin", text = "BonitoAgents is out")
+        @test occursin("you (personal) · linkedin", tool("project_draft"; draft_id = linkedin, personal = true,
+                                                          platform = "linkedin", kind = "post", text = "I released BonitoAgents"))
+        @test occursin("Removed draft #$dup", tool("project_remove_draft"; draft_id = dup))
+        mine = draft(; personal = true, platform = "mastodon", text = "I released BonitoAgents")
+        discourse = draft(; personal = true, platform = "discourse", title = "BonitoAgents 0.2", text = "It is out.")
+        boost = draft(; brand = "Makie", platform = "mastodon", kind = "repost", text = "", reshare = mine)
+        @test occursin("ready for review", tool("project_submit"; message = "four drafts"))
+        for id in (linkedin, mine, discourse, boost)
+            CM.review_draft!(app3, id, "approved")
+        end
+
+        sent = CM.publish_approved_with_pin!(app3, q.id, PIN)          # the release button
+        @test [d.id for d in sent] == [mine, boost]                     # the original before its reshare
+        @test all(d -> d.status == "published", sent)
+        @test last(NET.posted) == ("mastodon:sim@julialang.social", "I released BonitoAgents")
+        @test last(NET.reposted) == ("mastodon:makie@fosstodon.org", "101")
+        @test CM.find_project(app3, q.id).state == "publishing"
+        CM.mark_published!(app3, linkedin, "https://www.linkedin.com/posts/simon-1")
+        CM.mark_published!(app3, discourse, "https://discourse.julialang.org/t/bonitoagents/1")
+        @test all(d -> d.status == "published", CM.project_drafts(app3.state[], q.id))
+        @test CM.find_project(app3, q.id).state == "community"
     end
 
     @testset "state survives a restart" begin

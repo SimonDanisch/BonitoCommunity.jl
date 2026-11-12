@@ -224,23 +224,23 @@ function scan_projects!(app::CommunityApp)
 end
 
 """
-    save_draft!(app, project_id; draft_id = 0, brand = "", account = "", platform, kind, title, text, media, reshare = 0) -> Draft
+    save_draft!(app, project_id; draft_id = 0, brand = "", personal = false, account = "", platform, kind, title, text, media, reshare = 0) -> Draft
 
 Create a draft (`draft_id == 0`) or replace one. Either way it goes back to
 `draft`: whatever was approved before is not what it says now. A published
 draft stays as it was published.
 
 Who posts it: one of the project's `brand`s, through its account on the
-platform, or a personal `account` itself. With `reshare`, the id of an original
+platform, or you (`personal`, or one of your accounts named as `account`). With `reshare`, the id of an original
 draft on the same platform, it posts nothing of its own: it reposts that one.
 """
 function save_draft!(app::CommunityApp, project_id::AbstractString; draft_id::Int = 0, brand::AbstractString = "",
-                     account::AbstractString = "", platform::AbstractString, kind::AbstractString,
+                     personal::Bool = false, account::AbstractString = "", platform::AbstractString, kind::AbstractString,
                      title::AbstractString = "", text::AbstractString, media::Vector{String} = String[],
                      reshare::Int = 0)
     p = find_project(app, project_id)
     pl = find_platform(platform)
-    poster_brand, poster_account = draft_poster(app, p, pl, brand, account)
+    poster_brand, poster_account = draft_poster(app, p, pl, brand, account, personal)
     if reshare == 0
         lowercase(strip(kind)) in ("repost", "reshare") &&
             throw(AppError("a $(strip(kind)) reposts another draft: pass that draft's id as `reshare`"))
@@ -278,23 +278,36 @@ function save_draft!(app::CommunityApp, project_id::AbstractString; draft_id::In
 end
 
 # Who posts a draft, as (brand, account): a brand of the project that posts on
-# the platform, or a personal account (one of no brand) on the platform.
-function draft_poster(app::CommunityApp, p::Project, pl::Platform, brand::AbstractString, account::AbstractString)
+# the platform, or you. Your draft names one of your accounts only when you have
+# several on the platform; with one it is that one (`draft_account`), and a
+# platform you post to by hand needs none.
+function draft_poster(app::CommunityApp, p::Project, pl::Platform, brand::AbstractString,
+                      account::AbstractString, personal::Bool)
     b, a = strip(brand), strip(account)
-    isempty(b) && isempty(a) && throw(AppError("say who posts it: one of the project's brands, or a personal `account`"))
-    !isempty(b) && !isempty(a) && throw(AppError("give the brand or the personal account that posts it, not both"))
-    if isempty(a)
+    mine = personal || !isempty(a)
+    isempty(b) && !mine && throw(AppError("say who posts it: one of the project's brands, or you (`personal = true`)"))
+    !isempty(b) && mine && throw(AppError("give the brand that posts it or `personal`, not both"))
+    if !mine
         br = find_brand(app, b)
         br.name in p.brands || throw(AppError("project '$(p.id)' is not for $(br.name) (its brands: $(join(p.brands, ", ")))"))
         platform_id(pl) in br.platforms ||
             throw(AppError("$(br.name) does not post on $(platform_name(pl)) (it does on $(join(br.platforms, ", ")))"))
         return (br.name, "")
     end
-    acc = find_account(app, a)
-    isempty(acc.brand) || throw(AppError("$(acc.id) is $(acc.brand)'s account: draft it as `brand = \"$(acc.brand)\"`"))
-    acc.platform == platform_id(pl) || throw(AppError("$(acc.id) is a $(acc.platform) account, not $(platform_id(pl))"))
-    return ("", acc.id)
+    if !isempty(a)
+        acc = find_account(app, a)
+        isempty(acc.brand) || throw(AppError("$(acc.id) is $(acc.brand)'s account: draft it as `brand = \"$(acc.brand)\"`"))
+        acc.platform == platform_id(pl) || throw(AppError("$(acc.id) is a $(acc.platform) account, not $(platform_id(pl))"))
+        return ("", acc.id)
+    end
+    yours = personal_accounts(app, platform_id(pl))
+    length(yours) > 1 && throw(AppError("you have several personal $(platform_name(pl)) accounts: name the one that " *
+                                        "posts it as `account` ($(join((x.id for x in yours), ", ")))"))
+    return ("", "")
 end
+
+personal_accounts(app::CommunityApp, platform::AbstractString) =
+    [a for a in app.state[].accounts if isempty(a.brand) && a.platform == platform]
 
 # The original draft `source_id` that draft `id` (0 for a new one) of project
 # `project` on `platform` may reshare.
@@ -350,6 +363,8 @@ end
 
 function remove_draft!(app::CommunityApp, id::Int)
     is_out(find_draft(app, id)) && throw(AppError("draft #$id is $(find_draft(app, id).status); it stays on record"))
+    resharing = [d.id for d in app.state[].drafts if d.reshare_from == id]
+    isempty(resharing) || throw(AppError("draft #$(first(resharing)) reshares draft #$id: remove that one, or make it a post of its own, first"))
     return update!(s -> with(s; drafts = deleteat!(copy(s.drafts), draft_index(s, id))), app)
 end
 
@@ -428,19 +443,25 @@ function posting_account(app::CommunityApp, brand::AbstractString, platform::Abs
     return app.state[].accounts[i]
 end
 
-"The account that publishes draft `d`: the personal account it names, else its brand's; `nothing` while there is none."
+"""
+The account that publishes draft `d`: the one it names, else its brand's, else
+your personal account on its platform; `nothing` while there is none.
+"""
 function draft_account(app::CommunityApp, d::Draft)
     accounts = app.state[].accounts
-    i = isempty(d.account) ? findfirst(a -> a.role == "post" && a.brand == d.brand && a.platform == d.platform, accounts) :
-                             findfirst(a -> a.id == d.account, accounts)
+    i = !isempty(d.account) ? findfirst(a -> a.id == d.account, accounts) :
+        !isempty(d.brand) ? findfirst(a -> a.role == "post" && a.brand == d.brand && a.platform == d.platform, accounts) :
+        findfirst(a -> isempty(a.brand) && a.platform == d.platform, accounts)
     return i === nothing ? nothing : accounts[i]
 end
 
 function posting_account(app::CommunityApp, d::Draft)
-    isempty(d.account) && return posting_account(app, d.brand, d.platform)
     a = draft_account(app, d)
-    a === nothing && throw(AppError("draft #$(d.id) posts as $(d.account), which is no longer an account; add it again under Accounts"))
-    return a
+    a === nothing || return a
+    isempty(d.brand) || return posting_account(app, d.brand, d.platform)    # throws, saying so
+    throw(AppError(isempty(d.account) ?
+        "you have no personal $(platform_name(find_platform(d.platform))) account to post draft #$(d.id) with; add one under Accounts" :
+        "draft #$(d.id) posts as $(d.account), which is no longer an account; add it again under Accounts"))
 end
 
 "Explicitly configured personal accounts that repost `origin`'s post. Brand accounts reshare only when selected on that draft."
