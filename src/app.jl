@@ -203,7 +203,7 @@ function new_project!(app::CommunityApp, title::AbstractString, brands, brief::A
     return p
 end
 
-"A title from a folder's name: `2026-10-black-hole-render` is \"Black hole render\"."
+"A title from a folder's name: `2026-10-lorenz-attractor` is \"Lorenz attractor\"."
 folder_title(name::AbstractString) = uppercasefirst(replace(replace(name, r"^\d{4}-\d{2}-" => ""), r"[-_]+" => " "))
 
 function rename_project!(app::CommunityApp, id::AbstractString, title::AbstractString)

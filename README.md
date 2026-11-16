@@ -2,6 +2,12 @@
 
 A BonitoAgents app for the community work around Makie, Bonito and Makie4Science.
 
+![A project in review: the agent's drafts, one per platform, approved or sent back with a note, next to the project's own chat](docs/screenshot-review.png)
+
+*A project in review. The project's agent wrote one draft per platform; one is
+approved, one was sent back with a note, which went to the agent in the chat on
+the right.*
+
 ## How it works
 
 - **Projects.** One folder per video or piece of material in `projects/` (not in git).

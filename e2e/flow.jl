@@ -1,7 +1,9 @@
 # A walk through the Community app in a real browser (BonitoAgents' test kit: a
 # dev server, an Electron window, a scripted mock agent), with screenshots:
 #
-#     julia --project=e2e e2e/flow.jl        # → e2e/shots/*.png
+#     COMMUNITY_E2E_VIDEO=clip.mp4 julia --project=e2e e2e/flow.jl   # → e2e/shots/*.png
+#
+# The project's video is any mp4 you point it at.
 #
 # Brands are picked and "Start drafting" is clicked in the overview; the
 # overview's agent starts the project chat (`cm_start_project_chat`), whose
@@ -20,28 +22,30 @@ ENV["COMMUNITY_TEST_JULIA"] = joinpath(Sys.BINDIR, Base.julia_exename())
 
 const SHOTS = joinpath(@__DIR__, "shots")
 mkpath(SHOTS)
-const P = CM.project_slug("Black hole render")
+const P = CM.project_slug("Lorenz attractor")
 const EMPTY_PROJECT = CM.project_slug("Empty announcement")
-const VIDEO = "/home/sim/Programmieren/Science4Makie/black-hole-complete-20261025.mp4"
+# The project's video: any mp4 will do.
+const VIDEO = get(() -> error("set COMMUNITY_E2E_VIDEO to an .mp4 file for the walkthrough's project"),
+                  ENV, "COMMUNITY_E2E_VIDEO")
 
 const DRAFTS = [
-    (brand = "Makie4Science", platform = "youtube", kind = "video", media = "black-hole.mp4",
-     title = "Rendering a Black Hole with Makie: Ray-Traced Gravitational Lensing",
-     text = "We trace light around a Schwarzschild black hole and render the accretion disk with Makie.\n\n" *
-            "0:00 Why black holes bend light\n0:42 Tracing geodesics\n2:10 The accretion disk\n3:35 Rendering with Makie\n\n" *
-            "Code: https://github.com/MakieOrg\n#julialang #makie #science"),
-    (brand = "Makie4Science", platform = "tiktok", kind = "video", media = "black-hole.mp4", title = "",
-     text = "This is what a black hole really looks like: real physics, rendered with Makie 🕳️ #science #physics #julialang"),
-    (brand = "Makie4Science", platform = "instagram", kind = "reel", media = "black-hole.mp4", title = "",
-     text = "Light bending around a black hole, ray traced and rendered in Makie. Not an artist's impression: real geodesics. 🌌\n#blackhole #astrophysics #dataviz"),
-    (brand = "Makie4Science", platform = "facebook", kind = "video", media = "black-hole.mp4", title = "",
-     text = "How do you render a black hole? We traced light rays through curved spacetime and rendered the result with Makie, the Julia plotting library. Full walkthrough on YouTube."),
+    (brand = "Makie4Science", platform = "youtube", kind = "video", media = "lorenz.mp4",
+     title = "Animating the Lorenz Attractor with Makie",
+     text = "We integrate the Lorenz system and animate its trajectory with Makie, one frame per step.\n\n" *
+            "0:00 The Lorenz system\n0:40 Integrating it\n1:50 Animating with Observables\n3:05 Recording the video\n\n" *
+            "Code: https://github.com/MakieOrg\n#julialang #makie #dataviz"),
+    (brand = "Makie4Science", platform = "tiktok", kind = "video", media = "lorenz.mp4", title = "",
+     text = "Chaos, animated: the Lorenz attractor drawing itself with Makie 🦋 #dataviz #math #julialang"),
+    (brand = "Makie4Science", platform = "instagram", kind = "reel", media = "lorenz.mp4", title = "",
+     text = "The Lorenz attractor drawing itself, animated with Makie in a few lines of Julia. 🦋\n#chaos #dataviz #julialang"),
+    (brand = "Makie4Science", platform = "facebook", kind = "video", media = "lorenz.mp4", title = "",
+     text = "How do you animate a chaotic system? We integrated the Lorenz equations and animated the trajectory with Makie, the Julia plotting library. Full walkthrough on YouTube."),
     (brand = "Makie4Science", platform = "bluesky", kind = "post", media = "", title = "",
-     text = "We ray traced a black hole in Julia: geodesics, accretion disk, gravitational lensing, all rendered with Makie. Full video 👇 {youtube_url} #julialang"),
+     text = "We animated the Lorenz attractor in Julia: integration, Observables and recording, all with Makie. Full video 👇 {youtube_url} #julialang"),
     (brand = "Makie4Science", platform = "mastodon", kind = "post", media = "", title = "",
-     text = "New Makie4Science video: ray tracing a black hole in Julia, from geodesics to the final Makie render.\n\n{youtube_url}\n\n#JuliaLang #Makie #Astrophysics #DataViz"),
+     text = "New Makie4Science video: animating the Lorenz attractor in Julia, from the equations to the final Makie recording.\n\n{youtube_url}\n\n#JuliaLang #Makie #DataViz"),
     (brand = "Makie", platform = "linkedin", kind = "post", media = "", title = "",
-     text = "Scientific visualization is where Makie shines brightest. In our new Makie4Science video we ray trace a black hole and render it with Makie.\n---\nFull video: {youtube_url}"),
+     text = "Animation is where Makie's Observables shine. In our new Makie4Science video we animate the Lorenz attractor step by step.\n---\nFull video: {youtube_url}"),
 ]
 
 project_draft(i, d) = TK.mcp_call("project_draft"; real_process = true, id = "d$i", brand = d.brand, platform = d.platform,
@@ -55,7 +59,7 @@ agent(prompt) =
         [TK.text("Empty announcement workspace ready"), TK.end_turn()] :
     occursin("Start drafting project", prompt) ?
         [TK.mcp_call("cm_start_project_chat"; real_process = true, id = "start", project = P,
-                     prompt = "DRAFT-THE-POSTS: the black hole render in this folder, for Makie4Science (Makie reposts)."),
+                     prompt = "DRAFT-THE-POSTS: the Lorenz attractor animation in this folder, for Makie4Science (Makie reposts)."),
          TK.text("Started the project's chat; it is drafting the posts."), TK.end_turn()] :
     occursin("DRAFT-THE-POSTS", prompt) ?
         [TK.mcp_call("bt_process"; real_process=true, id="worker-file", arguments=Dict("action"=>"start", "id"=>"write-worker-file",
@@ -74,9 +78,9 @@ agent(prompt) =
 dir = mktempdir()
 projects = joinpath(dir, "projects")
 mkpath(joinpath(projects, P))
-symlink(VIDEO, joinpath(projects, P, "black-hole.mp4"))
+symlink(VIDEO, joinpath(projects, P, "lorenz.mp4"))
 write(joinpath(projects, P, "keep-on-server.txt"), "Original server material")
-write(joinpath(projects, P, "notes.md"), "Render notes: 4k, 120 s, one GPU.\n")
+write(joinpath(projects, P, "notes.md"), "Render notes: 1080p, 60 s, 30 fps.\n")
 mkpath(joinpath(projects, "2026-11-makie-0-25-release"))
 mkpath(joinpath(dir, "state", "apps", "community"))
 BT.atomic_write_json(joinpath(dir, "state", "apps", "community", "settings.json"),
@@ -207,9 +211,9 @@ try
     js(s, "document.documentElement.style.removeProperty('--bw-accent'); document.documentElement.style.removeProperty('--bw-bg-panel'); true")
     js(s, "document.querySelector('[data-act=toggle-accounts]').click(); true")
 
-    # pick the brands on the black hole card, then start drafting
-    card = "[...document.querySelectorAll('.cm-project')].find(c => c.innerText.includes('Black hole'))"
-    @test occursin("Black hole render", js(s, "$card.querySelector('.cm-project-title').textContent"))
+    # pick the brands on the Lorenz card, then start drafting
+    card = "[...document.querySelectorAll('.cm-project')].find(c => c.innerText.includes('Lorenz attractor'))"
+    @test occursin("Lorenz attractor", js(s, "$card.querySelector('.cm-project-title').textContent"))
     @test !occursin("null", js(s, "document.querySelector('.cm-grid').innerText"))
     js(s, "$card.querySelector('[data-value=\"Makie4Science\"]').click(); true")
     js(s, "$card.querySelector('[data-value=\"Makie\"]').click(); true")
@@ -279,7 +283,7 @@ try
     js(s, "document.querySelector('[data-draft=\"$tt\"] [data-act=changes-open]').click(); true")
     TK.wait_for(s, "the note field", "!!document.querySelector('[data-box=\"changes-$tt\"] input')"; timeout = 10)
     js(s, """(() => { const i = document.querySelector('[data-box="changes-$tt"] input');
-                     i.value = 'Say it is real physics, not an artist impression'; return true; })()""")
+                     i.value = 'Say it is the classic chaos example, not a random curve'; return true; })()""")
     js(s, "document.querySelector('[data-box=\"changes-$tt\"] [data-act=changes]').click(); true")
     for _ in 1:40
         CM.find_draft(app, tt).status == "changes" && CM.find_draft(app, yt).status == "approved" && break
@@ -293,7 +297,7 @@ try
     TK.wait_for(s, "the YouTube card approved",
         "document.querySelector('[data-draft=\"$yt\"] .cm-status')?.textContent === 'approved'"; timeout = 10)
     TK.wait_for(s, "the TikTok card sent back",
-        "document.querySelector('[data-draft=\"$tt\"] .cm-callout')?.textContent.includes('real physics')"; timeout = 10)
+        "document.querySelector('[data-draft=\"$tt\"] .cm-callout')?.textContent.includes('classic chaos example')"; timeout = 10)
     js(s, "document.querySelector('.cm-drafts').scrollIntoView(); true")
     shot(s, "6-reviewed")
 
@@ -332,7 +336,7 @@ try
 
     # published Mastodon post with a reply, to show the replies section
     md = only(filter(d -> d.platform == "mastodon", CM.project_drafts(app.state[], P)))
-    CM.set_link!(app, P, "youtube", "https://youtu.be/blackhole")
+    CM.set_link!(app, P, "youtube", "https://youtu.be/lorenz")
     CM.set_draft!(app, md.id; status = "published",
                   posts = [CM.Post("mastodon:m4s@fosstodon.org", "original", "1", "", "https://fosstodon.org/@m4s/1", now(UTC),
                                    Dict("likes" => 48, "reposts" => 17, "replies" => 1))])
@@ -355,7 +359,7 @@ try
     @test TK.wait_for(s, "missing brand leaves form open", "document.querySelector('[data-create-error]')?.textContent.includes('Choose at least one brand')"; timeout=10)
     @test js(s, "document.querySelector('[data-box=new] [name=title]').value === 'Empty announcement' && document.querySelector('[data-box=new] [name=brief]').value === 'Keep this brief after validation fails'")
     # A server-side error (duplicate project) must also preserve all inputs.
-    TK.set_input(s, "[data-box=new] [name=title]", "Black hole render")
+    TK.set_input(s, "[data-box=new] [name=title]", "Lorenz attractor")
     js(s, "document.querySelector('[data-box=new] [data-act=brand][data-value=Bonito]').click(); document.querySelector('[data-act=create]').click(); true")
     @test TK.wait_for(s, "duplicate project leaves form open", "document.querySelector('.bt-chatpane[aria-hidden=\"false\"] .cm-toast').textContent.includes('already a project') && !!document.querySelector('[data-box=new]')"; timeout=10)
     @test js(s, "document.querySelector('[data-box=new] [name=brief]').value === 'Keep this brief after validation fails' && document.querySelector('[data-box=new] [data-value=Bonito]').classList.contains('cm-on')")

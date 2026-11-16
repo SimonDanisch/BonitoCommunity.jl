@@ -123,7 +123,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
     end
 
     @testset "Bluesky facets: byte ranges of links, tags and mentions" begin
-        text = "Black hole 🕳️ #julialang by @makie.org: https://youtu.be/abc#t=3 (#nope in the link)"
+        text = "Lorenz attractor 🦋 #julialang by @makie.org: https://youtu.be/abc#t=3 (#nope in the link)"
         facets = CM.bsky_facets(text; resolve = h -> h == "makie.org" ? "did:plc:makie" : nothing)
         byrange(f) = String(codeunits(text)[f["index"]["byteStart"]+1:f["index"]["byteEnd"]])
         kinds = [f["features"][1]["\$type"] for f in facets]
@@ -138,11 +138,11 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
     end
 
     @testset "projects: created, and found as folders" begin
-        p = CM.new_project!(app, "Black hole render", ["makie4science", "Makie"], "Ray traced black hole")
-        @test startswith(p.id, Dates.format(today(), "yyyy-mm") * "-black-hole-render")
+        p = CM.new_project!(app, "Lorenz attractor", ["makie4science", "Makie"], "Animated Lorenz attractor")
+        @test startswith(p.id, Dates.format(today(), "yyyy-mm") * "-lorenz-attractor")
         @test p.brands == ["Makie4Science", "Makie"] && isempty(p.links)
         @test isdir(joinpath(projects, p.id))
-        @test_throws BT.AppError CM.new_project!(app, "Black hole render", ["Makie"], "")
+        @test_throws BT.AppError CM.new_project!(app, "Lorenz attractor", ["Makie"], "")
         @test_throws BT.AppError CM.new_project!(app, "No brand", String[], "")
         mkdir(joinpath(projects, "2026-12-dropped-in"))
         CM.scan_projects!(app)
@@ -211,10 +211,10 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
 
     @testset "drafts" begin
         r = call(server, chat, "project_draft"; brand = "Makie4Science", platform = "youtube", kind = "video",
-                 title = "How to render a black hole", text = "Chapters:\n0:00 Intro", media = "render.mp4")
+                 title = "How to animate the Lorenz attractor", text = "Chapters:\n0:00 Intro", media = "render.mp4")
         @test occursin("Saved draft #1", r)
         @test occursin("Saved draft #2", call(server, chat, "project_draft"; brand = "Makie4Science", platform = "mastodon",
-                                               kind = "post", text = "A black hole, rendered with Makie: {youtube_url} #julialang"))
+                                               kind = "post", text = "The Lorenz attractor, animated with Makie: {youtube_url} #julialang"))
         @test occursin("is not for Bonito", call(server, chat, "project_draft"; brand = "Bonito", platform = "bluesky",
                                                   kind = "post", text = "x"))
         @test occursin("does not post on TikTok", call(server, chat, "project_draft"; brand = "Makie",
@@ -229,9 +229,9 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         CM.review_draft!(app, 1, "changes"; note = "shorter title")
         @test occursin("user's note: shorter title", call(server, chat, "project_info"))
         call(server, chat, "project_draft"; brand = "Makie4Science", platform = "youtube", kind = "video",
-             title = "Black hole in Makie", text = "Chapters:\n0:00 Intro", media = "render.mp4", draft_id = 1)
+             title = "Lorenz attractor in Makie", text = "Chapters:\n0:00 Intro", media = "render.mp4", draft_id = 1)
         d1 = CM.find_draft(app, 1)
-        @test d1.status == "draft" && d1.note == "" && d1.title == "Black hole in Makie"
+        @test d1.status == "draft" && d1.note == "" && d1.title == "Lorenz attractor in Makie"
         @test_throws BT.AppError CM.edit_draft_text!(app, 2, "y"^600)
         @test occursin("ready for review", call(server, chat, "project_submit"; message = "two drafts"))
         @test CM.find_project(app, p.id).state == "review"
@@ -309,7 +309,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test_throws BT.AppError CM.publish_with_pin!(app, 2, PIN)
         d2 = CM.find_draft(app, 2)
         @test d2.status == "published"
-        @test NET.posted == [("mastodon:m4s@fosstodon.org", "A black hole, rendered with Makie: https://youtu.be/bh #julialang")]
+        @test NET.posted == [("mastodon:m4s@fosstodon.org", "The Lorenz attractor, animated with Makie: https://youtu.be/bh #julialang")]
         # Only an explicitly amplifying personal account reposts automatically.
         @test first.(NET.reposted) == ["mastodon:sim@julialang.social"]
         @test [x.kind for x in d2.posts] == ["original", "repost"]
@@ -568,7 +568,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         try
             bsky = CM.Account("bluesky:science", "bluesky", "Makie4Science", "science.makie.org", "http://127.0.0.1:$port", "post")
             embed = CM.bsky_image_embed(app, bsky, CM.Session("token", "did:test", now(UTC)), d)
-            @test embed["\$type"] == "app.bsky.embed.images" && only(embed["images"])["alt"] == "Image for Black hole render"
+            @test embed["\$type"] == "app.bsky.embed.images" && only(embed["images"])["alt"] == "Image for Lorenz attractor"
             mastodon = CM.Account("mastodon:local", "mastodon", "Makie4Science", "science", "http://127.0.0.1:$port", "post")
             CM.with_vault!(() -> CM.store_secret!(app, mastodon.id, "token"), app, PIN)
             @test CM.with_vault!(() -> CM.mastodon_media(app, mastodon, d), app, PIN) == ["media-1"]
@@ -604,7 +604,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         # The user's own posts: through their one Mastodon account, and by hand on
         # LinkedIn and Discourse, where nobody has an account (2026-11-12, the
         # agent could not draft those as personal posts).
-        r = draft(; personal = true, text = "I made a black hole")
+        r = draft(; personal = true, text = "I animated the Lorenz attractor")
         own = saved(r)
         @test occursin("you (personal) · mastodon", r) && !occursin("can't be published", r)
         r = draft(; personal = true, platform = "linkedin", text = "We released BonitoAgents")
@@ -651,7 +651,7 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
 
         CM.review_draft!(app2, own, "approved"); CM.review_draft!(app2, boost, "approved")
         CM.publish_with_pin!(app2, own, PIN)
-        @test last(NET.posted) == ("mastodon:sim@julialang.social", "I made a black hole")
+        @test last(NET.posted) == ("mastodon:sim@julialang.social", "I animated the Lorenz attractor")
         @test [p.account for p in CM.find_draft(app2, own).posts] == ["mastodon:sim@julialang.social"]   # no repost of itself
         CM.publish_with_pin!(app2, boost, PIN)
         @test last(NET.reposted) == ("mastodon:makie@fosstodon.org", "101")
