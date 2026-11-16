@@ -31,6 +31,8 @@ function node(tag, cls, children...; kw...)
 end
 box(cls, children...; kw...) = node("div", cls, children...; kw...)
 label(text) = box("cm-h2", text)
+# How long ago unix time `t` was; the browser keeps it current (community.js).
+age(t) = node("time", "cm-age", relative_time_label(t); dataAge = t)
 hint(text) = box("cm-hint", text)
 spacer() = node("span", "cm-spacer")
 function button(text, action; kind = "secondary", id = nothing, value = nothing, num = nothing, kw...)
@@ -184,7 +186,7 @@ function message_card(x; inbox = false)
     state = x["status"]
     source = inbox ? x["source"] : x["platform"]
     done = !(state in ("new", "drafted"))
-    text = box("cm-section", box("cm-row", node("strong", "", x["author_name"]), node("span", "cm-sub", "@$(x["author"]) · $(x["when"])"), badge(source; small = true), spacer(), status(state)),
+    text = box("cm-section", box("cm-row", node("strong", "", x["author_name"]), node("span", "cm-sub", "@$(x["author"]) · ", age(x["when"])), badge(source; small = true), spacer(), status(state)),
         inbox && !isempty(x["title"]) ? link(x["title"], x["url"]; cls = "cm-topic-title") : nothing,
         box("cm-reply-text", x["text"]), link("Open on $source ↗", x["url"]))
     actions = if done
@@ -234,23 +236,69 @@ function draft_text(text)
     start <= lastindex(text) && push!(content, text[start:end])
     content
 end
-function draft_card(x, ui)
-    id = x["id"]; state = x["status"]
-    out = state in ("publishing", "published")
-    images = [node("img", "cm-draft-image"; src=f["url"], alt=f["name"], loading="lazy") for f in x["media_files"] if f["image"]]
+
+# A draft's card is one node for the draft's life, and its parts follow the
+# draft each on its own. Next to the text it has an editor, built once with the
+# card: nothing from here replaces it, so an edit in progress survives whatever
+# the draft or the rest of the dashboard does (community.js `editDraft`).
+struct DraftCard
+    key::String
+    id::Int
+    platform::String
+    text::Observable{String}          # the raw text, for the editor
+    parts::Vector{CommunityRegion}    # the head, above the text, the text, below it, the foot
+end
+function Bonito.jsrender(s::Bonito.Session, c::DraftCard)
+    head, top, text, rest, foot = c.parts
+    editor = box("cm-draft-editor")
+    card = box("cm-card cm-draft", head, box("cm-draft-body", top, text, editor, rest), box("cm-draft-foot", foot);
+               dataDraft = c.id, style = Styles("--plat" => PLATFORM_COLORS[c.platform]))
+    connect = js"$(CommunityLib).then(lib => lib.draftEditor($(editor), $(c.text)))"
+    return Bonito.jsrender(s, DOM.div(card, connect; class = "cm-region"))
+end
+Base.close(c::DraftCard) = Bonito.Observables.clear(c.text)
+
+# The card of draft `x`, from `cards` or new, its parts brought up to date. Each
+# part is rebuilt only when what it shows changed. A new platform is a new card.
+function draft_card!(r, cards::Dict{String,DraftCard}, x)
+    key = "draft-items/$(x["id"])/$(x["platform"])"
+    editable = !(x["status"] in ("publishing", "published"))
+    parts = [r("$key/head", [x["brand"], x["kind"], x["updated"], x["status"]], () -> draft_head(x)),
+             r("$key/top", [x["title"], x["account_label"], x["reshare_from"]], () -> draft_top(x)),
+             r("$key/text", [x["text"], editable], () -> box("cm-draft-text", draft_text(x["text"])...; dataEditable = editable ? true : nothing)),
+             r("$key/rest", [x[k] for k in ("chars", "max", "media_files", "media", "note", "status", "posts", "stats")], () -> draft_rest(x)),
+             r("$key/foot", [x[k] for k in ("status", "marking", "changing", "reshare_options", "reshare_from", "publishes",
+                                            "needs_links", "has_account", "brand", "final_text", "title")], () -> draft_foot(x))]
+    c = get!(() -> DraftCard(key, x["id"], x["platform"], Observable(x["text"]), parts), cards, key)
+    c.text[] == x["text"] || (c.text[] = x["text"])
+    return c
+end
+
+draft_head(x) = box("cm-draft-head", badge(x["platform"]),
+    box("cm-draft-who", node("span", "cm-draft-name", x["platform"]),
+        node("span", "cm-draft-meta", "$(x["brand"]) · $(x["kind"]) · #$(x["id"]) · ", age(x["updated"]))), status(x["status"]))
+
+function draft_top(x)
     delivery = if !isempty(x["account_label"])
         x["reshare_from"] == 0 ? hint("Posts as $(x["account_label"])") : hint("Reshares original draft #$(x["reshare_from"]) as $(x["account_label"])")
     end
-    body = box("cm-draft-body", isempty(x["title"]) ? nothing : box("cm-draft-title", x["title"]),
-        delivery,
-        box("cm-draft-text", draft_text(x["text"])...; dataRaw = x["text"], dataEditable = out ? nothing : true),
-        node("progress", "cm-meter"; value = x["chars"], max = x["max"], title = "$(x["chars"]) of $(x["max"]) characters"),
+    DOM.div(isempty(x["title"]) ? nothing : box("cm-draft-title", x["title"]), delivery; class = "cm-region")
+end
+
+function draft_rest(x)
+    images = [node("img", "cm-draft-image"; src=f["url"], alt=f["name"], loading="lazy") for f in x["media_files"] if f["image"]]
+    DOM.div(node("progress", "cm-meter"; value = x["chars"], max = x["max"], title = "$(x["chars"]) of $(x["max"]) characters"),
         isempty(images) ? nothing : box("cm-draft-images", images...),
         box("cm-files", [node("span", "cm-file", f) for f in x["media"]]...),
-        isempty(x["note"]) ? nothing : box("cm-callout", state == "changes" ? "Changes asked: " * x["note"] : x["note"]),
-        box("cm-posted", [link("↗ " * (p["kind"] == "original" ? "Posted" : "Reshared") * " by " * p["account_label"], p["url"]) for p in x["posts"]]...), stats(x["stats"]))
-    foot = if ui["changing"] == id || ui["marking"] == id
-        changes = ui["changing"] == id
+        isempty(x["note"]) ? nothing : box("cm-callout", x["status"] == "changes" ? "Changes asked: " * x["note"] : x["note"]),
+        box("cm-posted", [link("↗ " * (p["kind"] == "original" ? "Posted" : "Reshared") * " by " * p["account_label"], p["url"]) for p in x["posts"]]...),
+        stats(x["stats"]); class = "cm-region")
+end
+
+function draft_foot(x)
+    id = x["id"]; state = x["status"]
+    if x["changing"] || x["marking"]
+        changes = x["changing"]
         box("cm-row", input(changes ? "note" : "url", changes ? "What should change?" : "Link to the post"),
             button(changes ? "Send" : "Mark published", changes ? "changes" : "mark"; id, kind = "primary"), button("Cancel", "cancel"; kind = "ghost"); dataBox = (changes ? "changes-" : "mark-") * string(id))
     elseif state in ("draft", "changes")
@@ -275,7 +323,6 @@ function draft_card(x, ui)
     else
         hint(state == "publishing" ? "Publishing…" : "Published")
     end
-    box("cm-card cm-draft", box("cm-draft-head", badge(x["platform"]), box("cm-draft-who", node("span", "cm-draft-name", x["platform"]), node("span", "cm-draft-meta", "$(x["brand"]) · $(x["kind"]) · #$id · $(x["updated"])")), status(state)), body, box("cm-draft-foot", foot); dataDraft = id, style = Styles("--plat" => PLATFORM_COLORS[x["platform"]]))
 end
 
 in_filter(f, x) = f == "all" || (f == "review" ? x["status"] in ("draft", "changes", "failed") : f == "approved" ? x["status"] in ("approved", "publishing") : x["status"] == f)
@@ -292,6 +339,8 @@ function dashboard_dom(session, d)
         obs[] == items || (obs[] = items)
         return Bonito.KeyedList(obs; key = x -> x.key)
     end
+    draft_cards = Dict{String,DraftCard}()
+    draft_items = Observable(DraftCard[])
     # Construct collection containers once. Their KeyedLists keep surviving
     # widget instances and only insert/remove/move changed identities.
     data = dashboard_data(d, d.app.state[], d.app.notice[])
@@ -319,8 +368,10 @@ function dashboard_dom(session, d)
             brief = r("brief", [p["brief"], p["links"]], () -> brief_view(p))
             drafts = filter(x -> in_filter(ui["filter"], x), p["drafts"])
             # Each card includes only its own expanded form state.
-            cards = [merge(x, Dict("marking" => ui["marking"] == x["id"], "changing" => ui["changing"] == x["id"])) for x in drafts]
-            draft_list = list("draft-items", cards, x -> x["id"], x -> draft_card(x, Dict("marking" => x["marking"] ? x["id"] : nothing, "changing" => x["changing"] ? x["id"] : nothing)))
+            cards = [draft_card!(r, draft_cards, merge(x, Dict("marking" => ui["marking"] == x["id"], "changing" => ui["changing"] == x["id"])))
+                     for x in drafts]
+            draft_items[] == cards || (draft_items[] = cards)
+            draft_list = Bonito.KeyedList(draft_items; key = c -> c.key)
             draft_header = r("draft-header", [ui["filter"], [x["status"] for x in p["drafts"]]], () -> box("cm-section-head", label("Drafts"), box("cm-filters", [button(title, "filter"; value = k) for (k, title) in (("all", "All"), ("review", "To review"), ("approved", "Approved"), ("published", "Published"))]...),
                 button("Approve all", "approve_all"; id = p["id"]), button("Publish approved automatic posts", "publish-all"; id = p["id"], kind = "primary", disabled = !any(x -> x["status"] == "approved" && x["publishes"], p["drafts"]))))
             r("drafts", "constant", () -> box("cm-section", draft_header, box("cm-drafts", draft_list)))
@@ -332,6 +383,7 @@ function dashboard_dom(session, d)
     onany((args...) -> update(), session, d.app.state, d.app.notice, d.ui)
     on(session.on_close) do _
         foreach(close, values(cache))
+        foreach(close, values(draft_cards))
     end
     # Workspace moves stable panels without reconstructing forms, media or chat.
     panel(id, title, content...) = BonitoWidgets.Panel(id, box("cm-workspace-scroll", content...); label=title)

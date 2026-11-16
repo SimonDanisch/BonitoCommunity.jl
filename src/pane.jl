@@ -80,7 +80,11 @@ function platform_data(pl::Platform)
                      "publishes" => publishes(pl), "max" => max_text(pl))
 end
 
-when(t::DateTime) = relative_time_label(datetime2unix(t))
+# Times go to the page as unix seconds, and the page keeps "5m ago" current
+# itself (community.js). A label here changed every minute and with it the
+# card's signature: each minute the poller's notice rebuilt every card whose age
+# had moved on, and a draft being edited lost its edit (2026-11-16).
+stamp(t::DateTime) = datetime2unix(t)
 
 # The text as it will be published, the links filled in that the project has.
 shown_text(d::Draft, p::Project) = fill_known_links(d.text, p)
@@ -110,18 +114,18 @@ function draft_data(dashboard::Dashboard, d::Draft, p::Project)
         "needs_links" => d.reshare_from == 0 ? missing_links(d.text, p) : String[],
         "posts" => [Dict("url" => x.url, "kind" => x.kind, "account" => x.account, "account_label" => account_label(app, x.account)) for x in d.posts],
         "stats" => isempty(d.posts) ? Dict{String,Int}() : d.posts[1].stats,
-        "updated" => when(d.updated))
+        "updated" => stamp(d.updated))
 end
 
 function inbox_data(x::InboxItem)
     Dict{String,Any}("ref" => x.ref, "source" => x.source, "kind" => x.kind, "brand" => x.brand, "author" => x.author,
                      "author_name" => x.author_name, "title" => x.title, "text" => x.text, "url" => x.url,
-                     "when" => when(x.created), "status" => x.status, "answer" => x.answer)
+                     "when" => stamp(x.created), "status" => x.status, "answer" => x.answer)
 end
 
 function reply_data(r::Reply)
     Dict{String,Any}("ref" => r.ref, "platform" => r.platform, "author" => r.author, "author_name" => r.author_name,
-                     "text" => r.text, "url" => r.url, "when" => when(r.created), "status" => r.status,
+                     "text" => r.text, "url" => r.url, "when" => stamp(r.created), "status" => r.status,
                      "answer" => r.answer, "draft" => r.draft)
 end
 
@@ -152,7 +156,7 @@ function project_card(d::Dashboard, s::CommunityFile, p::Project)
         "new_replies" => count(r -> r.status == "new", project_replies(s, p.id)),
         "platforms" => unique([x.platform for x in project_drafts(s, p.id)]),
         "stats" => stats_total(project_drafts(s, p.id)),
-        "created" => when(p.created))
+        "created" => stamp(p.created))
 end
 
 function dashboard_data(d::Dashboard, s::CommunityFile, notice::String)
@@ -497,8 +501,13 @@ const CommunityStyles = Styles(
     CSS(".cm-draft-title", "font-weight" => "600", "font-size" => "15px", "line-height" => "1.35"),
     CSS(".cm-draft-text", "white-space" => "pre-wrap", "overflow-wrap" => "anywhere", "font-size" => "var(--bw-font-size)",
         "line-height" => "1.5", "outline" => "none", "border-radius" => "6px", "max-height" => "260px", "overflow-y" => "auto"),
-    CSS(".cm-draft-text[contenteditable='plaintext-only']", "box-shadow" => "0 0 0 2px var(--bw-accent)", "padding" => "4px",
-        "max-height" => "none"),
+    # The card shows its text or, while it is edited, its editor (community.js).
+    CSS(".cm-draft-editor", "display" => "none", "white-space" => "pre-wrap", "overflow-wrap" => "anywhere",
+        "font-size" => "var(--bw-font-size)", "line-height" => "1.5", "outline" => "none", "border-radius" => "6px",
+        "box-shadow" => "0 0 0 2px var(--bw-accent)", "padding" => "4px"),
+    CSS(".cm-editing .cm-draft-editor", "display" => "block"),
+    CSS(".cm-editing .cm-draft-text", "display" => "none"),
+    CSS(".cm-draft-editor.cm-changed", "box-shadow" => "0 0 0 2px var(--bw-warning)"),
     CSS(".cm-draft-images", "display" => "grid", "grid-template-columns" => "repeat(auto-fit, minmax(92px, 1fr))", "gap" => "6px"),
     CSS(".cm-draft-image", "width" => "100%", "aspect-ratio" => "1.5", "object-fit" => "cover", "display" => "block",
         "border-radius" => "8px", "border" => "1px solid var(--bw-border)"),

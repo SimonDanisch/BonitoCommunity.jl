@@ -2,6 +2,23 @@
 // deno-lint-ignore-file
 // This code was bundled using `deno bundle` and it's not recommended to edit it manually
 
+function ageLabel(t) {
+    const d = Math.max(0, Date.now() / 1000 - t);
+    if (d < 90) return 'just now';
+    if (d < 3600) return `${Math.round(d / 60)}m ago`;
+    if (d < 86400) return `${Math.round(d / 3600)}h ago`;
+    return `${Math.round(d / 86400)}d ago`;
+}
+const EDITORS = new WeakMap();
+function draftEditor(editor, text) {
+    const state = {
+        text,
+        editing: null,
+        unsaved: null
+    };
+    EDITORS.set(editor, state);
+    text.on((value)=>state.editing?.arrived(value));
+}
 class DashboardController {
     constructor(root, dialog, pinOpen, actions, feedback, uiState, layout, layoutKey){
         this.root = root;
@@ -15,6 +32,8 @@ class DashboardController {
             childList: true,
             subtree: true
         });
+        const ages = ()=>root.querySelectorAll('time[data-age]').forEach((t)=>t.textContent = ageLabel(Number(t.dataset.age)));
+        const ageTimer = setInterval(()=>root.isConnected ? ages() : clearInterval(ageTimer), 30000);
         this.ui = {
             showNew: false,
             showAccounts: false,
@@ -69,7 +88,7 @@ class DashboardController {
         });
         root.addEventListener('dblclick', (e)=>{
             const n = e.target.closest('[data-edit-title], .cm-draft-text[data-editable]');
-            if (n) this.edit(n);
+            if (n) n.dataset.editTitle !== undefined ? this.edit(n) : this.editDraft(n.closest('[data-draft]'));
         });
         dialog.addEventListener('click', (e)=>{
             const act = e.target.closest('[data-act]')?.dataset.act;
@@ -173,10 +192,7 @@ class DashboardController {
     }
     edit(node) {
         if (node.isContentEditable) return;
-        const before = node.dataset.raw ?? node.textContent, children = [
-            ...node.childNodes
-        ];
-        node.textContent = before;
+        const before = node.textContent;
         node.contentEditable = 'plaintext-only';
         node.focus();
         const abort = new AbortController();
@@ -184,19 +200,75 @@ class DashboardController {
             abort.abort();
             node.contentEditable = 'false';
             const value = node.textContent.trim();
-            if (save && value && value !== before) this.send(node.dataset.editTitle ? 'title' : 'edit', node.dataset.editTitle ?? Number(node.closest('[data-draft]').dataset.draft), value);
-            else node.replaceChildren(...children);
+            if (save && value && value !== before) this.send('title', node.dataset.editTitle, value);
+            else node.textContent = before;
         };
         node.addEventListener('blur', ()=>finish(true), {
             signal: abort.signal
         });
         node.addEventListener('keydown', (e)=>{
-            if (e.key === 'Escape' || e.key === 'Enter' && node.dataset.editTitle) {
+            if (e.key === 'Escape' || e.key === 'Enter') {
                 e.preventDefault();
                 finish(e.key === 'Enter');
             }
         }, {
             signal: abort.signal
+        });
+    }
+    editDraft(card) {
+        const editor = card?.querySelector('.cm-draft-editor'), state = editor && EDITORS.get(editor);
+        if (!state || state.editing) return;
+        const id = Number(card.dataset.draft), sent = new Set([
+            state.text.value
+        ]);
+        let pending = null, timer = null;
+        const save = ()=>{
+            clearTimeout(timer);
+            timer = null;
+            const value = editor.textContent.trim();
+            if (value && value !== state.text.value && value !== pending) {
+                pending = value;
+                sent.add(value);
+                this.send('edit', id, value);
+            }
+        };
+        state.editing = {
+            arrived: (value)=>{
+                pending = null;
+                if (sent.has(value)) return;
+                editor.classList.add('cm-changed');
+                editor.title = 'This draft changed elsewhere while you were editing it. Your text is kept.';
+            }
+        };
+        const abort = new AbortController(), on = (type, f)=>editor.addEventListener(type, f, {
+                signal: abort.signal
+            });
+        editor.textContent = state.unsaved ?? state.text.value;
+        card.classList.add('cm-editing');
+        editor.contentEditable = 'plaintext-only';
+        editor.focus();
+        const finish = ()=>{
+            abort.abort();
+            save();
+            const typed = editor.textContent.trim();
+            editor.contentEditable = 'false';
+            editor.classList.remove('cm-changed');
+            editor.removeAttribute('title');
+            card.classList.remove('cm-editing');
+            state.editing = null;
+            state.unsaved = typed && typed !== state.text.value ? typed : null;
+        };
+        on('input', ()=>{
+            clearTimeout(timer);
+            timer = setTimeout(save, 1000);
+        });
+        on('blur', finish);
+        on('keydown', (e)=>{
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                finish();
+                editor.blur();
+            }
         });
     }
     checked(node) {
@@ -361,7 +433,7 @@ class DashboardController {
                     return;
                 }
             case 'edit':
-                return this.edit(this.root.querySelector(`[data-draft="${num}"] .cm-draft-text`));
+                return this.editDraft(this.root.querySelector(`[data-draft="${num}"]`));
             case 'copy':
                 return navigator.clipboard.writeText(b.dataset.value);
             case 'open-card':
@@ -372,5 +444,6 @@ class DashboardController {
         }
     }
 }
+export { draftEditor as draftEditor };
 export { DashboardController as DashboardController };
 

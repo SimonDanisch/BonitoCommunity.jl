@@ -90,7 +90,9 @@ end
 "One round of the background checks: the replies to the projects' posts, then the inbox."
 function poll!(app::CommunityApp)
     problems = vcat(poll_replies!(app), poll_inbox!(app))
-    app.notice[] = isempty(problems) ? "" : "Checking failed for " * join(problems, "; ")
+    notice = isempty(problems) ? "" : "Checking failed for " * join(problems, "; ")
+    # Every open dashboard recomputes on a notice: only for a new one.
+    app.notice[] == notice || (app.notice[] = notice)
     return nothing
 end
 

@@ -173,13 +173,13 @@ try
     js(s, "document.querySelector('[data-box=account-mastodon] [data-act=add-account]').click(); true")
     TK.wait_for(s, "empty account PIN", "!!document.querySelector('.cm-pin-dialog .bw-modal-open input')"; timeout=10)
     js(s, "document.querySelector('.cm-pin-dialog [name=pin]').value='e2e-only PIN'; document.querySelector('[data-act=pin-submit]').click(); true")
-    @test TK.wait_for(s, "missing handle is reported", "document.querySelector('.cm-toast').textContent.includes('needs its handle')"; timeout=10)
+    @test TK.wait_for(s, "missing handle is reported", "document.querySelector('.bt-chatpane[aria-hidden=\"false\"] .cm-toast').textContent.includes('needs its handle')"; timeout=10)
     TK.set_input(s, "[data-box=account-mastodon] [data-account-form=post] [name=handle]", "test-account@fosstodon.org")
     TK.set_input(s, "[data-box=account-mastodon] [data-account-form=post] [name=secret]", "e2e-only-token")
     js(s, "document.querySelector('[data-box=account-mastodon] [data-act=add-account]').click(); true")
     TK.wait_for(s, "filled account PIN", "!!document.querySelector('.cm-pin-dialog .bw-modal-open input')"; timeout=10)
     js(s, "document.querySelector('.cm-pin-dialog [name=pin]').value='e2e-only PIN'; document.querySelector('[data-act=pin-submit]').click(); true")
-    @test TK.wait_for(s, "account connects and stale error clears", "document.querySelector('[data-box=account-mastodon] .cm-configured').textContent.includes('test-account@fosstodon.org') && document.querySelector('.cm-toast').hidden"; timeout=10)
+    @test TK.wait_for(s, "account connects and stale error clears", "document.querySelector('[data-box=account-mastodon] .cm-configured').textContent.includes('test-account@fosstodon.org') && document.querySelector('.bt-chatpane[aria-hidden=\"false\"] .cm-toast').hidden"; timeout=10)
     @test js(s, "!!document.querySelector('[data-act=google-client]') && !!document.querySelector('[data-act=connect-youtube]')")
     @test js(s, "document.querySelector('[name=youtube_redirect]').value === location.origin + '/community-youtube-callback'")
     js(s, "document.querySelector('[data-act=connect-youtube]').click(); true")
@@ -297,6 +297,39 @@ try
     js(s, "document.querySelector('.cm-drafts').scrollIntoView(); true")
     shot(s, "6-reviewed")
 
+    # Editing a draft's text: a pause in typing saves it, and the editor stays
+    # open whatever changes meanwhile, its own card included. It used to close
+    # whenever the card was rebuilt, losing what was typed (2026-11-16).
+    bs, fb = (only(filter(d -> d.platform == pl, CM.project_drafts(app.state[], P))).id for pl in ("bluesky", "facebook"))
+    BS = "document.querySelector('[data-draft=\"$bs\"]')"
+    EDITOR = "$BS.querySelector('.cm-draft-editor')"
+    js(s, "window.__editedCard = $BS; $BS.querySelector('[data-act=edit]').click(); true")
+    @test js(s, "$EDITOR.isContentEditable && document.activeElement === $EDITOR")
+    js(s, """(() => { const r = document.createRange(); r.selectNodeContents($EDITOR); r.collapse(false);
+                     getSelection().removeAllRanges(); getSelection().addRange(r); return true; })()""")
+    for c in " Now in 4k."
+        TK.ECT.send_input(s.browser[], "{type: 'char', keyCode: $(repr(string(c)))}")
+    end
+    for _ in 1:40
+        endswith(CM.find_draft(app, bs).text, "Now in 4k.") && break
+        sleep(0.25)
+    end
+    @test endswith(CM.find_draft(app, bs).text, "Now in 4k.")
+    @test js(s, "$BS === window.__editedCard && $EDITOR.isContentEditable")
+    js(s, "document.querySelector('[data-draft=\"$fb\"] [data-act=approve]').click(); true")
+    @test TK.wait_for(s, "another card approved", "document.querySelector('[data-draft=\"$fb\"] .cm-status')?.textContent === 'approved'"; timeout = 10)
+    @test js(s, "$BS === window.__editedCard && $EDITOR.isContentEditable && document.activeElement === $EDITOR")
+    # The agent rewrites the same draft meanwhile: the editor says so and keeps what was typed.
+    CM.edit_draft_text!(app, bs, "Rewritten by the agent")
+    @test TK.wait_for(s, "the editor marks the change", "$EDITOR.classList.contains('cm-changed')"; timeout = 10)
+    @test endswith(js(s, "$EDITOR.textContent"), "Now in 4k.")
+    shot(s, "6b-editing")
+    # Escape leaves the editor, saves what it has, and leaves the chat's turn alone.
+    TK.ECT.send_input(s.browser[], "{type: 'keyDown', keyCode: 'Escape'}")
+    @test TK.wait_for(s, "the editor closed", "!$BS.classList.contains('cm-editing')"; timeout = 10)
+    @test TK.wait_for(s, "the card shows the saved text", "$BS.querySelector('.cm-draft-text').textContent.endsWith('Now in 4k.')"; timeout = 10)
+    @test endswith(CM.find_draft(app, bs).text, "Now in 4k.")
+
     # published Mastodon post with a reply, to show the replies section
     md = only(filter(d -> d.platform == "mastodon", CM.project_drafts(app.state[], P)))
     CM.set_link!(app, P, "youtube", "https://youtu.be/blackhole")
@@ -324,7 +357,7 @@ try
     # A server-side error (duplicate project) must also preserve all inputs.
     TK.set_input(s, "[data-box=new] [name=title]", "Black hole render")
     js(s, "document.querySelector('[data-box=new] [data-act=brand][data-value=Bonito]').click(); document.querySelector('[data-act=create]').click(); true")
-    @test TK.wait_for(s, "duplicate project leaves form open", "document.querySelector('.cm-toast').textContent.includes('already a project') && !!document.querySelector('[data-box=new]')"; timeout=10)
+    @test TK.wait_for(s, "duplicate project leaves form open", "document.querySelector('.bt-chatpane[aria-hidden=\"false\"] .cm-toast').textContent.includes('already a project') && !!document.querySelector('[data-box=new]')"; timeout=10)
     @test js(s, "document.querySelector('[data-box=new] [name=brief]').value === 'Keep this brief after validation fails' && document.querySelector('[data-box=new] [data-value=Bonito]').classList.contains('cm-on')")
     TK.set_input(s, "[data-box=new] [name=title]", "Empty announcement")
     js(s, "document.querySelector('[data-act=create]').click(); true")

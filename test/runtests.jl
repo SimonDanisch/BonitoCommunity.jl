@@ -237,6 +237,52 @@ same(a, b) = a isa AbstractVector ? length(a) == length(b) && all(splat(same), z
         @test CM.find_project(app, p.id).state == "review"
     end
 
+    # The page is sent times, not "5m ago". A label changed every minute and with
+    # it a card's data, so the card was rebuilt under a draft being edited and
+    # the edit was gone (2026-11-16): the checks' notice re-ran every dashboard
+    # once a minute.
+    @testset "the dashboard's data doesn't change with the clock" begin
+        saved = app.state[]
+        CM.update!(app) do st
+            CM.with(st; drafts = [CM.change(x; updated = now(UTC) - Millisecond(89_000)) for x in st.drafts])
+        end
+        project, overview = CM.Dashboard(app, nothing, p.id), CM.Dashboard(app, nothing, "")
+        data() = (CM.dashboard_data(project, app.state[], ""), CM.dashboard_data(overview, app.state[], ""))
+        before = data()
+        sleep(1.5)        # the drafts are over 90 s old now: no longer "just now"
+        @test data() == before
+        close(project); close(overview)
+        CM.update!(_ -> saved, app)
+        # A check that finds nothing new leaves the notice alone.
+        seen = Ref(0)
+        f = BT.Bonito.on(_ -> seen[] += 1, app.notice)
+        CM.poll!(app); CM.poll!(app)
+        @test seen[] == 0
+        BT.Bonito.off(f)
+    end
+
+    # A draft's card used to be rebuilt whole when anything in it changed, and
+    # the text being edited went with it. The card is built once now: an edit
+    # changes its text, which the browser holds while the editor is open, and
+    # the parts that show what changed, never the card.
+    @testset "a draft's card stays while its text changes" begin
+        saved = app.state[]
+        cache, cards = Dict{String,CM.CommunityRegion}(), Dict{String,CM.DraftCard}()
+        r(key, payload, build) = CM.region!(cache, key, payload, build)
+        project = CM.Dashboard(app, nothing, p.id)
+        card_data(id) = merge(only(filter(x -> x["id"] == id, CM.dashboard_data(project, app.state[], "")["project"]["drafts"])),
+                              Dict("marking" => false, "changing" => false))
+        c = CM.draft_card!(r, cards, card_data(1))
+        head, top = c.parts[1].content[], c.parts[2].content[]
+        CM.edit_draft_text!(app, 1, "Chapters:\n0:00 Intro\n1:00 The render")
+        @test CM.draft_card!(r, cards, card_data(1)) === c
+        @test c.text[] == "Chapters:\n0:00 Intro\n1:00 The render"
+        @test c.parts[1].content[] !== head        # its age changed
+        @test c.parts[2].content[] === top         # its title and delivery didn't
+        close(project)
+        CM.update!(_ -> saved, app)
+    end
+
     @testset "accounts: checked with the platform, secrets apart" begin
         @test_throws BT.AppError CM.add_account_with_pin!(app, "mastodon", "Makie4Science", "m4s@fosstodon.org", "", "post", "bad", PIN)
         a = CM.add_account_with_pin!(app, "mastodon", "Makie4Science", "@m4s@fosstodon.org", "", "post", "good", PIN)

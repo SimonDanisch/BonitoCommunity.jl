@@ -1,4 +1,24 @@
 // Julia renders the DOM; this instance handles browser-only interactions.
+
+// How long ago unix time `t` was, in the steps of BonitoAgents' relative_time_label.
+function ageLabel(t) {
+    const d = Math.max(0, Date.now() / 1000 - t);
+    if (d < 90) return 'just now';
+    if (d < 3600) return `${Math.round(d / 60)}m ago`;
+    if (d < 86400) return `${Math.round(d / 3600)}h ago`;
+    return `${Math.round(d / 86400)}d ago`;
+}
+
+// A draft card's editor (views.jl `DraftCard`) and the draft's raw text, which
+// the server keeps current. The editor is the card's own node, never rebuilt.
+const EDITORS = new WeakMap();
+
+export function draftEditor(editor, text) {
+    const state = {text, editing: null, unsaved: null};
+    EDITORS.set(editor, state);
+    text.on(value => state.editing?.arrived(value));
+}
+
 export class DashboardController {
     constructor(root, dialog, pinOpen, actions, feedback, uiState, layout, layoutKey) {
         this.root = root; this.dialog = dialog; this.pinOpen = pinOpen; this.actions = actions;
@@ -6,6 +26,10 @@ export class DashboardController {
         redirect();
         this.redirectObserver = new MutationObserver(redirect);
         this.redirectObserver.observe(root, {childList:true, subtree:true});
+        // The server sends times, not ages, so a card is rebuilt only when it
+        // changes: an edit in progress survives. The ages are kept current here.
+        const ages = () => root.querySelectorAll('time[data-age]').forEach(t => t.textContent = ageLabel(Number(t.dataset.age)));
+        const ageTimer = setInterval(() => root.isConnected ? ages() : clearInterval(ageTimer), 30000);
         this.ui = {showNew: false, showAccounts: false, showHandled: false, showBrands: false};
         uiState.on(state => Object.assign(this.ui, state));
         // Workspace handles mobile tab presentation without changing the saved
@@ -47,7 +71,10 @@ export class DashboardController {
                 e.preventDefault(); e.target.closest('[data-box]').querySelector('button').click();
             }
         });
-        root.addEventListener('dblclick', e => { const n = e.target.closest('[data-edit-title], .cm-draft-text[data-editable]'); if (n) this.edit(n); });
+        root.addEventListener('dblclick', e => {
+            const n = e.target.closest('[data-edit-title], .cm-draft-text[data-editable]');
+            if (n) n.dataset.editTitle !== undefined ? this.edit(n) : this.editDraft(n.closest('[data-draft]'));
+        });
         dialog.addEventListener('click', e => {
             const act = e.target.closest('[data-act]')?.dataset.act;
             if (act === 'pin-cancel') this.closePin(null);
@@ -111,20 +138,57 @@ export class DashboardController {
         if (t.dataset.save.startsWith('link:')) this.send('link', t.dataset.id, {key: t.dataset.save.slice(5), url: t.value.trim()});
         else this.send(t.dataset.save, t.dataset.id, t.value);
     }
+    // A project's title: Enter or leaving saves it, Escape keeps the old one.
     edit(node) {
         if (node.isContentEditable) return;
-        const before = node.dataset.raw ?? node.textContent, children = [...node.childNodes];
-        node.textContent = before; node.contentEditable = 'plaintext-only'; node.focus();
+        const before = node.textContent;
+        node.contentEditable = 'plaintext-only'; node.focus();
         const abort = new AbortController();
         const finish = save => {
             abort.abort(); node.contentEditable = 'false'; const value = node.textContent.trim();
-            if (save && value && value !== before) this.send(node.dataset.editTitle ? 'title' : 'edit', node.dataset.editTitle ?? Number(node.closest('[data-draft]').dataset.draft), value);
-            else node.replaceChildren(...children);
+            if (save && value && value !== before) this.send('title', node.dataset.editTitle, value);
+            else node.textContent = before;
         };
         node.addEventListener('blur', () => finish(true), {signal: abort.signal});
         node.addEventListener('keydown', e => {
-            if (e.key === 'Escape' || (e.key === 'Enter' && node.dataset.editTitle)) { e.preventDefault(); finish(e.key === 'Enter'); }
+            if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); finish(e.key === 'Enter'); }
         }, {signal: abort.signal});
+    }
+    // Edit a draft's text in its card's editor. A pause in typing saves it, and
+    // leaving (or Escape) saves what is left. The server's updates of the text
+    // don't touch the editor; one that isn't an echo of ours marks it, since the
+    // draft changed elsewhere meanwhile and the text typed here wins. A save the
+    // server refused (too long) stays in the editor for the next time.
+    editDraft(card) {
+        const editor = card?.querySelector('.cm-draft-editor'), state = editor && EDITORS.get(editor);
+        if (!state || state.editing) return;
+        const id = Number(card.dataset.draft), sent = new Set([state.text.value]);
+        // `pending`: sent, and the server hasn't answered with a text since.
+        let pending = null, timer = null;
+        const save = () => {
+            clearTimeout(timer); timer = null;
+            const value = editor.textContent.trim();
+            if (value && value !== state.text.value && value !== pending) { pending = value; sent.add(value); this.send('edit', id, value); }
+        };
+        state.editing = {arrived: value => {
+            pending = null;
+            if (sent.has(value)) return;
+            editor.classList.add('cm-changed');
+            editor.title = 'This draft changed elsewhere while you were editing it. Your text is kept.';
+        }};
+        const abort = new AbortController(), on = (type, f) => editor.addEventListener(type, f, {signal: abort.signal});
+        editor.textContent = state.unsaved ?? state.text.value;
+        card.classList.add('cm-editing'); editor.contentEditable = 'plaintext-only'; editor.focus();
+        const finish = () => {
+            abort.abort(); save();
+            const typed = editor.textContent.trim();
+            editor.contentEditable = 'false'; editor.classList.remove('cm-changed'); editor.removeAttribute('title');
+            card.classList.remove('cm-editing'); state.editing = null;
+            state.unsaved = typed && typed !== state.text.value ? typed : null;
+        };
+        on('input', () => { clearTimeout(timer); timer = setTimeout(save, 1000); });
+        on('blur', finish);
+        on('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); finish(); editor.blur(); } });
     }
     checked(node) { return [...node.querySelectorAll('.cm-brand-toggle.cm-on')].map(b => b.dataset.value); }
     click(e) {
@@ -189,7 +253,7 @@ export class DashboardController {
                 const value = box.querySelector(a === 'mark' ? '[name=url]' : '[name=note]').value.trim();
                 if (value) { this.send(a, num, value); this.view({marking: null, changing: null}); } return;
             }
-            case 'edit': return this.edit(this.root.querySelector(`[data-draft="${num}"] .cm-draft-text`));
+            case 'edit': return this.editDraft(this.root.querySelector(`[data-draft="${num}"]`));
             case 'copy': return navigator.clipboard.writeText(b.dataset.value);
             case 'open-card': if (b.dataset.chat) this.send('open', b.dataset.chat); return;
             default: return this.send(a, b.dataset.num === undefined ? id : num, b.dataset.value ?? null);
